@@ -53,18 +53,27 @@ mod coverage {
         pub(crate) fn write_format(
             report: &CodeCoverageReport,
             max_filename_length: usize,
-            fraction: &mut Fraction,
+            vals: Fraction,
+            thresholds: Fraction,
             base_path: &[u8],
             writer: &mut impl bun_io::Write,
             enable_ansi_colors: bool,
         ) -> bun_io::Result<()> {
             if enable_ansi_colors {
-                text::write_format::<true>(report, max_filename_length, fraction, base_path, writer)
+                text::write_format::<true>(
+                    report,
+                    max_filename_length,
+                    vals,
+                    thresholds,
+                    base_path,
+                    writer,
+                )
             } else {
                 text::write_format::<false>(
                     report,
                     max_filename_length,
-                    fraction,
+                    vals,
+                    thresholds,
                     base_path,
                     writer,
                 )
@@ -1580,7 +1589,9 @@ impl CommandLineReporter {
         reporters_lcov: bool,
         enable_ansi_colors: bool,
     ) -> crate::Result<()> {
-        if !reporters_text && !reporters_lcov {
+        // `coverageReporter = []` with a `coverageThreshold` still decides
+        // the exit code, so the per-file fractions have to be computed.
+        if !reporters_text && !reporters_lcov && !opts.fail_on_low_coverage {
             return Ok(());
         }
 
@@ -1692,13 +1703,8 @@ impl CommandLineReporter {
         } else if reporters_lcov {
             bun::perf::trace("TestCommand.printCodeCoverageLCov")
         } else {
-            // Unreachable by construction.
-            unreachable!("No reporters enabled")
+            bun::perf::trace("TestCommand.printCodeCoverageThresholdOnly")
         };
-
-        if !reporters_text && !reporters_lcov {
-            unreachable!("No reporters enabled");
-        }
 
         let relative_dir = bun_resolver::fs::FileSystem::get().top_level_dir;
 
@@ -1906,12 +1912,19 @@ impl CommandLineReporter {
                 continue;
             };
 
+            // The coverage threshold applies to every reporter, not just the
+            // text table (the exit code reads `opts.fractions.failing`).
+            let fraction = report.coverage_fraction(base_fraction);
+            if fraction.failing {
+                failing = true;
+            }
+
             if reporters_text {
-                let mut fraction = base_fraction;
                 if coverage::Text::write_format(
                     &report,
                     max_filepath_length,
-                    &mut fraction,
+                    fraction,
+                    base_fraction,
                     relative_dir,
                     console_writer,
                     enable_ansi_colors,
@@ -1924,9 +1937,6 @@ impl CommandLineReporter {
                 avg.lines += fraction.lines;
                 avg.stmts += fraction.stmts;
                 avg_count += 1.0;
-                if fraction.failing {
-                    failing = true;
-                }
 
                 console_writer.extend_from_slice(b"\n");
             }
@@ -1941,6 +1951,8 @@ impl CommandLineReporter {
 
             drop(report);
         }
+
+        opts.fractions.failing = failing;
 
         if reporters_text {
             {
@@ -1998,7 +2010,6 @@ impl CommandLineReporter {
                 return Ok(());
             }
 
-            opts.fractions.failing = failing;
             Output::flush();
         }
 
@@ -3007,11 +3018,33 @@ impl TestCommand {
 
         let should_fail_on_no_tests = !ctx.test_options.pass_with_no_tests
             && (failed_to_find_any_tests || summary.did_label_filter_out_all_tests());
+        let coverage_below_threshold = coverage_options.enabled
+            && coverage_options.fractions.failing
+            && coverage_options.fail_on_low_coverage;
+        if coverage_below_threshold {
+            // Metrics `test.coverageThreshold` left out are not enforced and
+            // hold 0 here; name the one(s) the run is failing on.
+            let thresholds = coverage_options.fractions;
+            match (thresholds.functions > 0.0, thresholds.lines > 0.0) {
+                (true, true) => pretty_errorln!(
+                    "<r><red>error<r><d>:<r> Coverage is below the configured <b>test.coverageThreshold<r> (functions: {:.2}%, lines: {:.2}%)",
+                    thresholds.functions * 100.0,
+                    thresholds.lines * 100.0
+                ),
+                (true, false) => pretty_errorln!(
+                    "<r><red>error<r><d>:<r> Function coverage is below the configured <b>test.coverageThreshold<r> of {:.2}%",
+                    thresholds.functions * 100.0
+                ),
+                _ => pretty_errorln!(
+                    "<r><red>error<r><d>:<r> Line coverage is below the configured <b>test.coverageThreshold<r> of {:.2}%",
+                    thresholds.lines * 100.0
+                ),
+            }
+            Output::flush();
+        }
         if should_fail_on_no_tests
             || summary.fail > 0
-            || (coverage_options.enabled
-                && coverage_options.fractions.failing
-                && coverage_options.fail_on_low_coverage)
+            || coverage_below_threshold
             || !write_snapshots_success
             || reporter.jest.unhandled_errors_between_tests > 0
         {
