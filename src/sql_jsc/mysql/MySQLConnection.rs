@@ -1381,9 +1381,9 @@ impl MySQLConnection {
                 self.flags.insert(ConnectionFlags::IS_READY_FOR_QUERY);
                 statement.status = mysql_statement::Status::Failed;
                 // err.error_message is a Data{ .temporary = ... } slice into the socket read
-                // buffer which will be overwritten by the next packet. The statement is cached
-                // in this.statements and its error_response may be read later via
-                // stmt.error_response.toJS(), so we must own a copy of the message bytes.
+                // buffer which will be overwritten by the next packet. Queries that attached
+                // to this statement before the failure read stmt.error_response later, so we
+                // must own a copy of the message bytes.
                 // ErrorPacket lacks Clone in bun_sql (Data is not Clone), so
                 // reconstruct field-by-field with an owned dupe of the message
                 // — the scalar fields (header / error_code / sql_state) are
@@ -1396,6 +1396,20 @@ impl MySQLConnection {
                     error_message: Data::create(err.error_message.slice())
                         .map_err(|_| AnyMySQLError::OutOfMemory)?,
                 };
+                // Evict the failed prepare from the statement cache so the next query with
+                // this text re-prepares instead of rethrowing the stale server error forever
+                // (mirrors PostgresSQLConnection's ErrorResponse handler).
+                let name = &statement.signature.name[..];
+                let owned_by_map = self
+                    .statements
+                    .get(name)
+                    .is_some_and(|&p| core::ptr::eq(p, core::ptr::from_ref(&*statement)))
+                    && self.statements.remove(name).is_some();
+                if owned_by_map {
+                    // SAFETY: the map held one intrusive ref on the statement; the request
+                    // still holds its own ref, so this cannot drop the count to zero.
+                    unsafe { MySQLStatement::deref(core::ptr::from_mut(statement)) };
+                }
                 self.queue.mark_as_ready_for_query();
                 self.queue.mark_current_request_as_finished(request);
 
