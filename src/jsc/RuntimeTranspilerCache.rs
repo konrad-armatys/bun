@@ -54,7 +54,9 @@ bun_core::declare_scope!(cache, visible);
 /// Version 26: ModuleInfo wire format is a string table (u8/u16/u32
 /// offsets picked by a header byte) plus a body of tagged records with
 /// u8/u16/u32 ids and implied slots dropped, instead of fixed u32 arrays.
-const EXPECTED_VERSION: u32 = 26;
+/// Version 27: zod transform (`BUN_FEATURE_FLAG_EXPERIMENTAL_ZOD`); the flag
+/// participates in the features hash only when enabled.
+const EXPECTED_VERSION: u32 = 27;
 
 /// Source files smaller than this are not written to / read from the on-disk
 /// transpiler cache. Originally 50 KiB, which excluded almost every file in a
