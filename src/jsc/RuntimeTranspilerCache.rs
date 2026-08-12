@@ -54,7 +54,10 @@ bun_core::declare_scope!(cache, visible);
 /// Version 26: ModuleInfo wire format is a string table (u8/u16/u32
 /// offsets picked by a header byte) plus a body of tagged records with
 /// u8/u16/u32 ids and implied slots dropped, instead of fixed u32 arrays.
-const EXPECTED_VERSION: u32 = 26;
+/// Version 27: The ESM record's `has_tla` comes from the awaits the printer
+/// emitted rather than the parser's await keyword, so a module whose only
+/// top-level await was eliminated as dead code no longer records one.
+const EXPECTED_VERSION: u32 = 27;
 
 /// Source files smaller than this are not written to / read from the on-disk
 /// transpiler cache. Originally 50 KiB, which excluded almost every file in a
