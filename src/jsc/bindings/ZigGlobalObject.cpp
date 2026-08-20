@@ -3366,8 +3366,7 @@ JSC::Identifier GlobalObject::moduleLoaderResolve(JSGlobalObject* jsGlobalObject
     if (key.isString()) {
         auto moduleName = uncheckedDowncast<JSString>(key)->value(globalObject);
         RETURN_IF_EXCEPTION(scope, {});
-        // `file:` with any slash count: WHATWG parsing normalizes
-        // `file:/path` and `file:path` to `file:///path`, like Node.
+        // Any slash count: WHATWG parsing normalizes `file:/p` to `file:///p`.
         if (moduleName->startsWith("file:"_s)) {
             auto url = WTF::URL(moduleName);
             if (url.isValid() && !url.isEmpty()) {
