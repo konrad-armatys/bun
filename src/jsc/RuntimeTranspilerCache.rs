@@ -54,7 +54,10 @@ bun_core::declare_scope!(cache, visible);
 /// Version 26: ModuleInfo wire format is a string table (u8/u16/u32
 /// offsets picked by a header byte) plus a body of tagged records with
 /// u8/u16/u32 ids and implied slots dropped, instead of fixed u32 arrays.
-const EXPECTED_VERSION: u32 = 26;
+/// Version 27: Files forced to ESM by ".mjs"/".mts" or package.json
+/// "type": "module" are parsed in strict mode (#32175); a cache hit from an
+/// older version would hide the new strict-mode errors.
+const EXPECTED_VERSION: u32 = 27;
 
 /// Source files smaller than this are not written to / read from the on-disk
 /// transpiler cache. Originally 50 KiB, which excluded almost every file in a
