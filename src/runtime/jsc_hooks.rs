@@ -2650,6 +2650,8 @@ fn transpile_source_code_inner(
                     virtual_source,
                     dont_bundle_twice: true,
                     allow_commonjs: true,
+                    // SAFETY: per fn contract — `jsc_vm` is the live per-thread VM.
+                    runtime_hot: unsafe { &*jsc_vm }.is_hot_reload_enabled(),
                     module_type: module_type_only_for_wrappables,
                     // SAFETY: per fn contract — `jsc_vm` is the live per-thread VM.
                     inject_jest_globals: unsafe {
@@ -4327,6 +4329,9 @@ pub unsafe extern "C" fn Bun__transpileFile(
                 }
             }
 
+            // SAFETY: per fn contract — `jsc_vm` is the live per-thread VM; the
+            // shared borrow ends before `transpiler_store` is borrowed mutably.
+            let runtime_hot = unsafe { &*jsc_vm }.is_hot_reload_enabled();
             // SAFETY: per fn contract — `jsc_vm` is the live per-thread VM.
             // `lr.path` borrows `_specifier`, which the store immediately
             // heap-duplicates inside `transpile()`.
@@ -4339,6 +4344,7 @@ pub unsafe extern "C" fn Bun__transpileFile(
                     referrer.clone(),
                     concurrent_loader,
                     lr.package_json,
+                    runtime_hot,
                 )
             };
         }
