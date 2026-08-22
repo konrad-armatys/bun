@@ -3,7 +3,11 @@
  * for local mode. Override via `--webkit-version=<hash>` to test a branch.
  * From https://github.com/oven-sh/WebKit releases.
  */
-export const WEBKIT_VERSION = "2da33d53e33e71055d66f4b84537aa8cb0b0e99d";
+// Preview of oven-sh/WebKit#487: DeferredWorkTimer keeps the embedder's tickets in
+// m_pendingTickets, so the end of a collection cancels the tickets of a dead realm before the
+// embedder runs their tasks. It sits on top of 2da33d53, the pin here before this change. Swap
+// in the merged sha once that PR lands.
+export const WEBKIT_VERSION = "autobuild-preview-pr-487-085be312";
 
 /**
  * WebKit (JavaScriptCore) — the JS engine.
