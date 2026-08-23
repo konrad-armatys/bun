@@ -39,8 +39,8 @@ pub struct HTTPContext<const SSL: bool> {
     /// struct is either a `http_thread.{http,https}_context` static or a
     /// `bun.default_allocator.create()` for custom-SSL entries.
     pub(crate) group: uws::SocketGroup,
-    /// `SSL_CTX*` built from this context's SSLConfig (or the default
-    /// `request_cert=1` opts). One owned ref; `SSL_CTX_free` on deinit.
+    /// The one `SSL_CTX` ref this context built from its SSLConfig (or the
+    /// default `request_cert=1` opts); released after the group in `Drop`.
     /// Only meaningful when `SSL`.
     pub(crate) secure: Option<bun_boringssl_sys::OwnedSslCtx>,
     /// HTTP/2 sessions with at least one active stream, available for

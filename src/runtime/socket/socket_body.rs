@@ -262,7 +262,7 @@ impl<const SSL: bool> boringssl_sys::AlpnSelectCallback for TlsSocketAlpnSelect<
 #[repr(C)]
 pub struct NewSocket<const SSL: bool> {
     pub(crate) socket: Cell<uws::NewSocketHandler<SSL>>,
-    /// `SSL_CTX*` this client connection was opened with. One owned ref.
+    /// The `SSL_CTX` ref this client connection was opened with.
     /// Server-accepted sockets and plain TCP leave this `None` (the Listener /
     /// SecureContext owns the ref there).
     pub(crate) owned_ssl_ctx: JsCell<Option<OwnedSslCtx>>,

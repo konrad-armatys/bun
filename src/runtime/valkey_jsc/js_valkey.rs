@@ -307,9 +307,9 @@ pub struct JSValkeyClient {
     pub poll_ref: JsCell<KeepAlive>,
 
     pub(crate) _subscription_ctx: JsCell<SubscriptionCtx>,
-    /// `us_ssl_ctx_t` for `tls: { …custom CA… }`. `tls: true` borrows
-    /// `RareData.defaultClientSslCtx()` instead; `tls: false` leaves this null.
-    /// One ref on the custom-TLS `SSL_CTX`, reused across reconnects.
+    /// The `SSL_CTX` ref for `tls: { …custom CA… }`, reused across reconnects.
+    /// `tls: true` borrows `RareData.defaultClientSslCtx()` instead; `tls: false`
+    /// leaves this `None`.
     pub(crate) _secure: JsCell<Option<bun_boringssl_sys::OwnedSslCtx>>,
 
     pub(crate) timer: RefCountedTimer,
