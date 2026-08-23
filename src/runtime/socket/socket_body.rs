@@ -3104,15 +3104,15 @@ impl<const SSL: bool> NewSocket<SSL> {
         // `on_close` without a prior `on_open` is wrong, and the natural
         // failure path delivers `on_connect_error` from the loop instead).
         // Closing one here therefore runs *no* terminal callback, stranding
-        // the +1 `connect_finish` took on `this` (whose matching `deref()`
-        // lives in `on_close`/`handle_connect_error`) and the Strong
-        // `this_value` upgrade. node:net reaches this for every aborted /
+        // the `io_ref` `connect_finish` took on `this` (otherwise released by
+        // `on_close`/`handle_connect_error`) and the Strong `this_value`
+        // upgrade. node:net reaches this for every aborted /
         // `autoSelectFamily`-timed-out attempt via `_handle.close()`.
         //
         // `socket.socket.get().is_some()` is `true` only for the
         // `Connected(us_socket_t)` arm — the `Connecting` arm fires
-        // `on_connecting_error` synchronously inside `close()` and so does
-        // its own `deref()`; double-releasing it would underflow.
+        // `on_connecting_error` synchronously inside `close()`, which releases
+        // `io_ref` itself.
         let is_semi_connect = socket.socket.get().is_some() && !socket.is_established();
         // `_handle.close()` is the net.Socket `_destroy()` path — Node emits close_notify
         // once and closes the fd without waiting for the peer's reply. `.fast_shutdown`
@@ -4278,9 +4278,8 @@ impl DuplexUpgradeContext {
             // `has_handlers() == false` in `onOpen`.
             //
             // Refcount: `adopt_io_ref` installs our +1 as the socket's
-            // `io_ref` and `handle_connect_error` releases it. Do NOT let
-            // `RefPtr::Drop` fire on top of that (over-deref → UAF on
-            // the JS wrapper's pointee).
+            // `io_ref` and `handle_connect_error` releases it; nothing here
+            // may release it a second time.
             //
             // Neuter the JS listener thunks now, while the wrapper is still
             // strongly held, so the later `StartTLS` → `deinit` → `Drop`

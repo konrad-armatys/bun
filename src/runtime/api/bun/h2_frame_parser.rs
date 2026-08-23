@@ -98,11 +98,10 @@ enum BunSocket {
     // BACKREF — the socket strictly outlives the H2FrameParser while attached:
     // `Tls`/`Tcp` are kept alive by the `RefPtr<H2FrameParser>` stored in
     // the socket's `native_callback` slot (released in `detach_native_socket`),
-    // and `*Writeonly` are kept alive by the manual `ref_()`/`deref()` pair in
-    // `attach_to_native_socket` / `detach_native_socket`. `BackRef` makes the
-    // shared-only deref safe at every read site (all `NewSocket` methods used
-    // here take `&self`). The `*Writeonly` ref itself lives in
-    // `H2FrameParser::writeonly_socket_ref`.
+    // and `*Writeonly` by the ref `H2FrameParser::writeonly_socket_ref` holds
+    // between `attach_to_native_socket` and `detach_native_socket`. `BackRef`
+    // makes the shared-only deref safe at every read site (all `NewSocket`
+    // methods used here take `&self`).
     Tls(bun_ptr::BackRef<TLSSocket, bun_ptr::Mut>),
     TlsWriteonly(bun_ptr::BackRef<TLSSocket, bun_ptr::Mut>),
     Tcp(bun_ptr::BackRef<TCPSocket, bun_ptr::Mut>),
