@@ -2077,22 +2077,43 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
       db.destroy();
       a = b = undefined;
     }
+    // The bytes a session put on its transport: the client preface, then whole frames only
+    // (9-byte header + declared length, known type), nothing interleaved mid-frame.
+    const assertWellFormed = (name, chunks) => {
+      const all = Buffer.concat(chunks);
+      const preface = Buffer.from("PRI * HTTP/2.0" + String.fromCharCode(13, 10, 13, 10) + "SM" + String.fromCharCode(13, 10, 13, 10));
+      if (!all.subarray(0, preface.length).equals(preface)) throw new Error(name + ": bad preface");
+      let off = preface.length;
+      let frames = 0;
+      while (off < all.length) {
+        if (off + 9 > all.length) throw new Error(name + ": truncated frame header at " + off);
+        const len = all.readUIntBE(off, 3);
+        const type = all[off + 3];
+        if (type > 0x0c) throw new Error(name + ": unknown frame type " + type + " at " + off);
+        if (off + 9 + len > all.length) throw new Error(name + ": truncated frame payload at " + off);
+        off += 9 + len;
+        frames++;
+      }
+      if (frames < 10) throw new Error(name + ": only " + frames + " frames");
+    };
     // Three sessions: A corks while B owns the slot; flushing B re-enters JS and B's _write
     // emits a frame on C, so C takes the slot before A's cork() resumes.
     for (let i = 0; i < N; i++) {
       let a, b, c;
       let crossPings = 0;
-      const mk = onWrite =>
+      const wire = { a: [], b: [], c: [] };
+      const mk = (name, onWrite) =>
         new Duplex({
           read() {},
           write(chunk, enc, cb) {
+            wire[name].push(Buffer.from(chunk));
             onWrite();
             cb();
           },
         });
-      const da = mk(() => {});
-      const dc = mk(() => {});
-      const db = mk(() => {
+      const da = mk("a", () => {});
+      const dc = mk("c", () => {});
+      const db = mk("b", () => {
         if (c && crossPings < 20) {
           crossPings++;
           c.ping(Buffer.alloc(8), () => {});
@@ -2112,6 +2133,7 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
         await new Promise(r => setImmediate(r));
       }
       if (crossPings === 0) throw new Error("B's transport _write never re-entered C");
+      for (const name of ["a", "b", "c"]) assertWellFormed(name, wire[name]);
       for (const s of [a, b, c]) s.destroy();
       await new Promise(r => setImmediate(r));
       for (const d of [da, db, dc]) d.destroy();

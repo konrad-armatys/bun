@@ -2324,32 +2324,28 @@ impl H2FrameParser {
         self.register_auto_flush();
     }
 
-    /// Take the cork slot for this parser, first flushing whoever holds it. Returns whether the
-    /// slot is now ours; `false` (a re-entrant chain of sessions kept re-taking it) means write
-    /// directly instead.
-    fn cork(&self) -> bool {
+    /// Take the cork slot for this parser, first flushing whoever holds it.
+    fn cork(&self) {
         // Flushing the current owner writes, which can re-enter JS and cork this or yet another
-        // session; re-read the slot after each flush and only take it when it is free.
-        for _ in 0..8 {
+        // session; re-read the slot after each flush and only take it once it is free, so no
+        // session's corked bytes are ever dropped.
+        loop {
             match CORKED_H2.get() {
                 // already corked (possibly from inside a forced uncork below)
-                Some(corked) if std::ptr::eq(corked.as_const_ptr(), self) => return true,
+                Some(corked) if std::ptr::eq(corked.as_const_ptr(), self) => return,
                 // force uncork
                 Some(corked) => {
                     corked.uncork();
                 }
-                None => {
-                    CORKED_H2.set(Some(self.this_ptr().into()));
-                    let prev = self.cork_ref.replace(Some(self.new_ref()));
-                    debug_assert!(prev.is_none(), "cork_ref already held");
-                    self.register_auto_flush();
-                    bun_output::scoped_log!(H2FrameParser, "cork {:p}", self);
-                    CORK_OFFSET.with(|c| c.set(0));
-                    return true;
-                }
+                None => break,
             }
         }
-        false
+        CORKED_H2.set(Some(self.this_ptr().into()));
+        let prev = self.cork_ref.replace(Some(self.new_ref()));
+        debug_assert!(prev.is_none(), "cork_ref already held");
+        self.register_auto_flush();
+        bun_output::scoped_log!(H2FrameParser, "cork {:p}", self);
+        CORK_OFFSET.with(|c| c.set(0));
     }
 
     pub(crate) fn generic_flush<S: NativeSocketWrite>(&self, mut socket: S) -> usize {
@@ -3008,9 +3004,10 @@ impl H2FrameParser {
 
     pub(crate) fn write(&self, mut bytes: &[u8]) -> bool {
         bun_output::scoped_log!(H2FrameParser, "write {}", bytes.len());
-        if !ENABLE_AUTO_CORK || !self.cork() {
+        if !ENABLE_AUTO_CORK {
             return self._write(bytes);
         }
+        self.cork();
         if matches!(self.native_socket.get(), BunSocket::None) {
             return self.write_to_js_transport(bytes);
         }
@@ -3040,12 +3037,10 @@ impl H2FrameParser {
             });
             CORK_OFFSET.with(|c| c.set(H2_CORK_BUFFER_SIZE as u16));
             ok = self.flush_cork_buffer() && ok;
-            bytes = &bytes[avail..];
             // The flush's _write can re-enter JS and re-cork a different parser;
             // re-assert ownership before touching the shared cork state again.
-            if !self.cork() {
-                return self._write(bytes) && ok;
-            }
+            self.cork();
+            bytes = &bytes[avail..];
         }
     }
 
