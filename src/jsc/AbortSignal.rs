@@ -161,6 +161,13 @@ impl AbortSignal {
         WebCore__AbortSignal__ref(self)
     }
 
+    /// Take a new counted reference to this signal.
+    pub fn to_ref(&self) -> AbortSignalRef {
+        // SAFETY: `self` is live; `ref_()` bumps the C++ refcount and returns
+        // the same pointer, whose +1 the handle now owns.
+        unsafe { AbortSignalRef::adopt(self.ref_()) }
+    }
+
     pub fn unref(&self) {
         WebCore__AbortSignal__unref(self)
     }
