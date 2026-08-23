@@ -282,9 +282,13 @@ impl WindowsNamedPipeContext {
             socket
         };
         match_socket!(socket, |s: NewSocket<SSL>| {
+            // `create()`'s ref, taken out first so a reconnect from the
+            // handler can install its own; released once the handler is done.
+            let ours = s.named_pipe_ref.take();
             let failed = NewSocket::handle_connect_error(s, errno, 0);
-            // Release the ref taken in `create()`.
-            s.release_named_pipe_ref();
+            if let Some(r) = ours {
+                r.deref();
+            }
             failed
         });
     }
@@ -307,9 +311,12 @@ impl WindowsNamedPipeContext {
             (socket, ptr::addr_of_mut!((*this).named_pipe))
         };
         match_socket!(socket, |s: NewSocket<SSL>| {
+            // See `fail_connect`.
+            let ours = s.named_pipe_ref.take();
             let closed = NewSocket::on_close(s, socket_from_named_pipe::<SSL>(pipe), 0, None);
-            // Release the ref taken in `create()`.
-            s.release_named_pipe_ref();
+            if let Some(r) = ours {
+                r.deref();
+            }
             closed
         });
         // SAFETY: `this` is the live ctx pointer registered in create();

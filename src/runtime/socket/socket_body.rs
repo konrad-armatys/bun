@@ -383,14 +383,16 @@ impl PendingSystemError {
     }
 }
 
-/// `io_ref` is the ref the now-detached native socket held. The idle
+/// `io_ref` is the ref the failed connection held. The idle
 /// teardown is gated on the socket still holding the `Handlers` we entered with:
 /// `onConnectError` can reconnect, and we must not tear that connection down.
 struct ConnectErrorTeardown<const SSL: bool> {
     socket: bun_ptr::ThisPtr<NewSocket<SSL>>,
     entered: Rc<Handlers>,
-    /// The failed native socket's `io_ref` (when it had one), taken before the
-    /// user's handler runs so a synchronous reconnect can install its own.
+    /// The failed connection's `io_ref` (the native socket's, or the one
+    /// `connect_finish` took for a connect that failed synchronously), taken
+    /// before the user's handler runs so a synchronous reconnect can install
+    /// its own.
     io_ref: Option<RefPtr<NewSocket<SSL>>>,
 }
 
@@ -1112,11 +1114,7 @@ impl<const SSL: bool> NewSocket<SSL> {
         this.buffered_data_for_node_net
             .with_mut(|b| b.clear_and_free());
 
-        let io_ref = if this.socket.get().is_detached() {
-            None
-        } else {
-            this.io_ref.take()
-        };
+        let io_ref = this.io_ref.take();
         this.socket.set(SocketHandler::<SSL>::DETACHED);
 
         let vm = handlers.vm;

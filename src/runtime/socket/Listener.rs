@@ -1692,9 +1692,8 @@ fn connect_finish<const IS_SSL: bool>(
             };
             {
                 let this = socket;
+                // Releases the `io_ref` taken above.
                 let handled = NewSocket::<IS_SSL>::handle_connect_error(this, errno, 0);
-                // Release the `io_ref` taken above.
-                this.release_io_ref();
                 // A `connectError` handler that threw on this synchronous failure
                 // throws from `connect()`.
                 handled?;
