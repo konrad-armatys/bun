@@ -1403,6 +1403,7 @@ dependencies = [
  "bstr",
  "bun_alloc",
  "bun_core",
+ "bun_ptr",
  "libc",
  "smallvec",
  "strum",
