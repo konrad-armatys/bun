@@ -70,10 +70,9 @@ pub struct Listener {
     /// listener. `group.ext` = `*Listener`, so the dispatch handler recovers us
     /// from the socket without a context-ext lookup.
     pub(crate) group: JsCell<uws::SocketGroup>,
-    /// `SSL_CTX*` for accepted sockets. One owned ref; `SSL_CTX_free` on close.
+    /// The one `SSL_CTX` ref `listen()` built; released by `do_stop`/`deinit`.
     /// `SSL_new()` per-accept takes its own ref, so accepted sockets outlive a
     /// stopped listener safely.
-    /// The one `SSL_CTX` ref `listen()` built; released by `do_stop`/`deinit`.
     pub(crate) secure_ctx: JsCell<Option<boring_sys::OwnedSslCtx>>,
     pub(crate) ssl: bool,
     pub(crate) protos: Option<Box<[u8]>>,
