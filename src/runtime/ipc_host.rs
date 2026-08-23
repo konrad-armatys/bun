@@ -494,7 +494,7 @@ pub fn get_ipc_instance(
         let loop_ = vm.uws_loop();
         let group: *mut bun_uws::SocketGroup = vm.rare_data().spawn_ipc_group(loop_);
 
-        let send_queue = SendQueue::new(mode, None, IPC::SocketUnion::Uninitialized);
+        let send_queue = SendQueue::new(mode, None, IPC::SocketUnion::Uninitialized).into_raw();
         let instance = IPCInstance::new(IPCInstance {
             // SAFETY: `SendQueue::new` returns a non-null owned ref.
             data: unsafe { core::ptr::NonNull::new_unchecked(send_queue) },
@@ -539,7 +539,7 @@ pub fn get_ipc_instance(
 
     #[cfg(windows)]
     let instance: *mut IPCInstance = {
-        let send_queue = SendQueue::new(mode, None, IPC::SocketUnion::Uninitialized);
+        let send_queue = SendQueue::new(mode, None, IPC::SocketUnion::Uninitialized).into_raw();
         let instance = IPCInstance::new(IPCInstance {
             // SAFETY: `SendQueue::new` returns a non-null owned ref.
             data: unsafe { core::ptr::NonNull::new_unchecked(send_queue) },

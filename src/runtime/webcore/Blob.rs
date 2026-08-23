@@ -1866,7 +1866,7 @@ impl BlobExt for Blob {
             }
 
             // SAFETY: sink is live; `to_js` takes its own per-wrapper +1.
-            let js = unsafe { (*sink).to_js(global_this) };
+            let js = webcore::FileSink::to_js(unsafe { bun_ptr::ThisPtr::new(sink) }, global_this);
             return Ok(js);
         }
 
@@ -1921,7 +1921,7 @@ impl BlobExt for Blob {
             }
 
             // SAFETY: sink is live; `to_js` takes its own per-wrapper +1.
-            let js = unsafe { (*sink).to_js(global_this) };
+            let js = webcore::FileSink::to_js(unsafe { bun_ptr::ThisPtr::new(sink) }, global_this);
             Ok(js)
         }
     }
@@ -6230,6 +6230,13 @@ pub enum Any {
     Blob(Blob),
     InternalBlob(Internal),
     WTFStringImpl(bun_core::WTFStringImpl),
+}
+
+impl Default for Any {
+    /// The detached state (see [`Any::detach`]).
+    fn default() -> Self {
+        Any::Blob(Blob::default())
+    }
 }
 
 impl Any {
