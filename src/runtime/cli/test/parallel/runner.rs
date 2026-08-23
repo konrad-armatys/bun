@@ -35,7 +35,7 @@ const DEFAULT_SCALE_UP_AFTER_MS: i64 = 5;
 /// fell back to the sequential path (≤1 effective worker). The caller uses
 /// this to decide whether to run the serial coverage/JUnit reporters.
 pub(crate) fn run_as_coordinator(
-    reporter: &mut CommandLineReporter,
+    reporter: &'static CommandLineReporter,
     vm: *mut VirtualMachine,
     files: &[Interned],
     ctx: Command::Context,
@@ -67,7 +67,7 @@ pub(crate) fn run_as_coordinator(
     if ctx.test_options.reporters.junit {
         // Coordinator's own JunitReporter would otherwise produce an empty
         // document and overwrite the merged one in writeJUnitReportIfNeeded.
-        if let Some(jr) = reporter.reporters.junit.take() {
+        if let Some(jr) = reporter.reporters.junit.borrow_mut().take() {
             let _ = env.map.put(b"BUN_TEST_WORKER_JUNIT", b"1");
             drop(jr);
         }
@@ -101,7 +101,8 @@ pub(crate) fn run_as_coordinator(
     // of file count, and each chunk is dispatched slowest-first (cache hits
     // depend on which worker runs a file, not the order within the worker).
     let mut costs: Option<Vec<u64>> = None;
-    let ranges: Vec<FileRange> = match reporter.timings.as_ref() {
+    let timings = reporter.timings.borrow();
+    let ranges: Vec<FileRange> = match timings.as_ref() {
         Some(t) if !t.is_empty() && !ctx.test_options.randomize => {
             let ranges = t.partition(&sorted, k);
             for r in &ranges {
@@ -117,6 +118,7 @@ pub(crate) fn run_as_coordinator(
             })
             .collect(),
     };
+    drop(timings);
 
     let mut workers: Vec<Worker> = Vec::with_capacity(k as usize);
     // Populate fully BEFORE constructing Coordinator so it can hold
@@ -220,13 +222,8 @@ pub(crate) fn run_as_coordinator(
 
     if ctx.test_options.reporters.junit {
         if let Some(outfile) = &ctx.test_options.reporter_outfile {
-            // `coord` holds the unique &mut to `reporter`; obtain the summary
-            // through it. Raw-pointer reborrow because merge_junit_fragments
-            // also needs &mut coord (it only reads from summary).
-            let summary_ptr: *const crate::test_runner::jest::Summary = coord.reporter.summary();
-            // SAFETY: summary lives in *coord.reporter, which outlives this call
-            // and is not mutated by merge_junit_fragments.
-            aggregate::merge_junit_fragments(&mut coord, outfile, unsafe { &*summary_ptr });
+            let summary = *coord.reporter.summary();
+            aggregate::merge_junit_fragments(&mut coord, outfile, &summary);
         }
     }
     if coverage_opts.enabled {
@@ -516,13 +513,13 @@ impl ChannelOwner for WorkerCommands {
 
 // Hoisted from a local struct inside run_as_worker — Rust does not
 // support method-bearing local structs that need to be named in a generic call.
-struct WorkerLoop<'a> {
-    reporter: &'a mut CommandLineReporter,
+struct WorkerLoop {
+    reporter: &'static CommandLineReporter,
     vm: *mut VirtualMachine,
     cmds: WorkerCommands,
 }
 
-impl<'a> WorkerLoop<'a> {
+impl WorkerLoop {
     fn begin(&mut self) {
         // SAFETY: vm pointer is valid for the worker's lifetime.
         let vm = unsafe { &mut *self.vm };
@@ -553,13 +550,13 @@ impl<'a> WorkerLoop<'a> {
             };
             self.cmds.pending_idx = None;
 
-            self.reporter.worker_ipc_file_idx = Some(idx);
+            self.reporter.worker_ipc_file_idx.set(Some(idx));
             wf.begin(frame::Kind::FileStart);
             wf.u32(idx);
             self.cmds.send(wf.finish());
 
             let before = *self.reporter.summary();
-            let before_unhandled = self.reporter.jest.unhandled_errors_between_tests;
+            let before_unhandled = self.reporter.jest.unhandled_errors_between_tests.get();
 
             // A worker never knows which file is its last, so preload-level hooks wrap every file (with or without --isolate).
             if let Err(err) = TestCommand::run(
@@ -583,9 +580,9 @@ impl<'a> WorkerLoop<'a> {
             } else {
                 Global::mimalloc_cleanup(false);
             }
-            self.reporter.jest.default_timeout_override = u32::MAX;
+            self.reporter.jest.default_timeout_override.set(u32::MAX);
 
-            if let Some(junit) = &mut self.reporter.reporters.junit {
+            if let Some(junit) = self.reporter.reporters.junit.borrow_mut().as_deref_mut() {
                 while !junit.suite_stack.is_empty() {
                     let _ = junit.end_test_suite();
                 }
@@ -610,7 +607,7 @@ impl<'a> WorkerLoop<'a> {
                 after.expectations - before.expectations,
                 after.skipped_because_label - before.skipped_because_label,
                 after.files - before.files,
-                self.reporter.jest.unhandled_errors_between_tests - before_unhandled,
+                self.reporter.jest.unhandled_errors_between_tests.get() - before_unhandled,
             ] {
                 wf.u32(v);
             }
@@ -631,7 +628,7 @@ impl<'a> WorkerLoop<'a> {
 // would alias. The `# Safety` contract above documents the caller's obligation.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub(crate) fn run_as_worker(
-    reporter: &mut CommandLineReporter,
+    reporter: &'static CommandLineReporter,
     vm: *mut VirtualMachine,
     ctx: Command::Context,
 ) -> ! {
@@ -650,12 +647,15 @@ pub(crate) fn run_as_worker(
     // vm.allocator = arena.arena(); — allocator params dropped in Rust
 
     let env = vm_ref.env_loader();
-    if let Some(junit) = reporter.reporters.junit.as_mut() {
-        junit.elements_only = true;
-    } else if env.get(b"BUN_TEST_WORKER_JUNIT").is_some() {
-        let mut junit = test_command::JunitReporter::init();
-        junit.elements_only = true;
-        reporter.reporters.junit = Some(junit);
+    {
+        let mut junit_slot = reporter.reporters.junit.borrow_mut();
+        if let Some(junit) = junit_slot.as_mut() {
+            junit.elements_only = true;
+        } else if env.get(b"BUN_TEST_WORKER_JUNIT").is_some() {
+            let mut junit = test_command::JunitReporter::init();
+            junit.elements_only = true;
+            *junit_slot = Some(junit);
+        }
     }
 
     let mut wloop = WorkerLoop {
@@ -699,7 +699,7 @@ pub(crate) fn run_as_worker(
 }
 
 fn worker_flush_aggregates(
-    reporter: &mut CommandLineReporter,
+    reporter: &CommandLineReporter,
     vm: &mut VirtualMachine,
     ctx: &Command::ContextData,
     cmds: &mut WorkerCommands,
@@ -707,20 +707,21 @@ fn worker_flush_aggregates(
     // Snapshots flush lazily when the next file opens its snapshot file; the
     // last file each worker ran has no successor to trigger that.
     if let Some(runner) = crate::test_runner::jest::Jest::runner() {
-        let _ = runner.snapshots.write_inline_snapshots().unwrap_or(false);
-        let _ = runner.snapshots.write_snapshot_file();
+        let mut snapshots = runner.snapshots.borrow_mut();
+        let _ = snapshots.write_inline_snapshots().unwrap_or(false);
+        let _ = snapshots.write_snapshot_file();
     }
 
     // SAFETY: single-threaded worker; WORKER_FRAME is a process-global scratch buffer
     let wf = unsafe { &mut *WORKER_FRAME.get() };
 
     wf.begin(frame::Kind::RepeatBufs);
-    wf.str(reporter.failures_to_repeat_buf.as_slice());
-    wf.str(reporter.skips_to_repeat_buf.as_slice());
-    wf.str(reporter.todos_to_repeat_buf.as_slice());
+    wf.str(reporter.failures_to_repeat_buf.borrow().as_slice());
+    wf.str(reporter.skips_to_repeat_buf.borrow().as_slice());
+    wf.str(reporter.todos_to_repeat_buf.borrow().as_slice());
     cmds.send(wf.finish());
 
-    if let Some(junit) = &mut reporter.reporters.junit {
+    if let Some(junit) = reporter.reporters.junit.borrow_mut().as_deref_mut() {
         while !junit.suite_stack.is_empty() {
             let _ = junit.end_test_suite();
         }
