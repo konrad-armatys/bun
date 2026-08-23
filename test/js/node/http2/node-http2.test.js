@@ -2036,6 +2036,47 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
       duplex.destroy();
       session = undefined;
     }
+    // Two sessions over JS transports: B's _write emits a frame on A, so A corks itself from
+    // inside the forced uncork of B that A's own cork() started.
+    for (let i = 0; i < N; i++) {
+      let a, b;
+      let crossPings = 0;
+      const mk = onWrite =>
+        new Duplex({
+          read() {},
+          write(chunk, enc, cb) {
+            onWrite();
+            cb();
+          },
+        });
+      const da = mk(() => {});
+      const db = mk(() => {
+        if (a && crossPings < 20) {
+          crossPings++;
+          a.ping(Buffer.alloc(8), () => {});
+        }
+      });
+      a = http2.connect("http://127.0.0.1:1", { createConnection: () => da });
+      b = http2.connect("http://127.0.0.1:1", { createConnection: () => db });
+      a.on("error", () => {});
+      b.on("error", () => {});
+      await Promise.all([new Promise(r => a.once("connect", r)), new Promise(r => b.once("connect", r))]);
+      for (let j = 0; j < 5; j++) {
+        // interleave frames on both sessions within one tick so each corks over the other
+        a.settings({ enablePush: false });
+        b.settings({ enablePush: false });
+        b.ping(Buffer.alloc(8), () => {});
+        a.ping(Buffer.alloc(8), () => {});
+        await new Promise(r => setImmediate(r));
+      }
+      if (crossPings === 0) throw new Error("B's transport _write never re-entered A");
+      a.destroy();
+      b.destroy();
+      await new Promise(r => setImmediate(r));
+      da.destroy();
+      db.destroy();
+      a = b = undefined;
+    }
     let live = -1;
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 10));

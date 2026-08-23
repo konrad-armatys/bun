@@ -2331,6 +2331,11 @@ impl H2FrameParser {
             }
             // force uncork
             corked.uncork();
+            // That parser's write can re-enter JS and emit a frame on this session, which
+            // corks it from the inside; the slot (and its bytes) are then already ours.
+            if self.is_corked() {
+                return;
+            }
         }
         // cork
         CORKED_H2.set(Some(self.this_ptr().into()));
