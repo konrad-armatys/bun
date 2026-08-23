@@ -2077,6 +2077,46 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
       db.destroy();
       a = b = undefined;
     }
+    // Three sessions: A corks while B owns the slot; flushing B re-enters JS and B's _write
+    // emits a frame on C, so C takes the slot before A's cork() resumes.
+    for (let i = 0; i < N; i++) {
+      let a, b, c;
+      let crossPings = 0;
+      const mk = onWrite =>
+        new Duplex({
+          read() {},
+          write(chunk, enc, cb) {
+            onWrite();
+            cb();
+          },
+        });
+      const da = mk(() => {});
+      const dc = mk(() => {});
+      const db = mk(() => {
+        if (c && crossPings < 20) {
+          crossPings++;
+          c.ping(Buffer.alloc(8), () => {});
+        }
+      });
+      a = http2.connect("http://127.0.0.1:1", { createConnection: () => da });
+      b = http2.connect("http://127.0.0.1:1", { createConnection: () => db });
+      c = http2.connect("http://127.0.0.1:1", { createConnection: () => dc });
+      for (const s of [a, b, c]) s.on("error", () => {});
+      await Promise.all([a, b, c].map(s => new Promise(r => s.once("connect", r))));
+      for (let j = 0; j < 5; j++) {
+        b.ping(Buffer.alloc(8), () => {});
+        a.ping(Buffer.alloc(8), () => {});
+        c.settings({ enablePush: false });
+        b.settings({ enablePush: false });
+        a.settings({ enablePush: false });
+        await new Promise(r => setImmediate(r));
+      }
+      if (crossPings === 0) throw new Error("B's transport _write never re-entered C");
+      for (const s of [a, b, c]) s.destroy();
+      await new Promise(r => setImmediate(r));
+      for (const d of [da, db, dc]) d.destroy();
+      a = b = c = undefined;
+    }
     let live = -1;
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 10));
