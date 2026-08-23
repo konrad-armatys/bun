@@ -640,16 +640,19 @@ impl<const IS_SSL: bool> NewSocketHandler<IS_SSL> {
         }
     }
 
-    /// Overwrite the typed ext slot (the `T` it was sized for at group
-    /// creation). Returns `false` for transports without ext storage.
-    pub fn write_ext<T>(&self, value: T) -> bool {
+    /// Point the socket's ext slot at `owner` (or clear it). Every socket in
+    /// a Bun-created group has a one-pointer ext slot (`connect_group`,
+    /// `adopt_group`, the listen/connect paths all size it as
+    /// `Option<NonNull<_>>`), so this writes exactly that pointer. Returns
+    /// `false` for transports without ext storage.
+    pub fn set_ext_owner<Owner>(&self, owner: Option<NonNull<Owner>>) -> bool {
         match self.socket {
             InternalSocket::Connected(s) => {
-                *sock(s).ext::<T>() = value;
+                *sock(s).ext::<Option<NonNull<Owner>>>() = owner;
                 true
             }
             InternalSocket::Connecting(s) => {
-                *conn(s).ext::<T>() = value;
+                *conn(s).ext::<Option<NonNull<Owner>>>() = owner;
                 true
             }
             _ => false,

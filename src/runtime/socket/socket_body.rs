@@ -9,7 +9,7 @@ use bun_io::KeepAlive;
 use bun_jsc::EncodedSliceJsc as _;
 use bun_jsc::JsCell;
 use bun_jsc::bun_string_jsc;
-use bun_ptr::{AsCtxPtr as _, OwnedThis, RefPtr, ThisPtr};
+use bun_ptr::{AsCtxPtr as _, BackRef, OwnedThis, RefPtr, ThisPtr};
 // do NOT `use bun_boringssl_sys::SSL` here — it shadows the
 // `const SSL: bool` generic param in `NewSocket<SSL>` below, making rustc
 // resolve `<SSL>` as a type arg (E0747). Use the qualified path instead.
@@ -113,7 +113,7 @@ impl<const SSL: bool> boringssl_sys::AlpnSelectCallback for TlsSocketAlpnSelect<
         offered: &'o [u8],
     ) -> Result<Option<&'o [u8]>, boringssl_sys::AlpnReject> {
         use boringssl_sys::AlpnReject;
-        let Some(this) = ssl.ex_data_ref::<NewSocket<SSL>>(TLS_SOCKET_EX_DATA) else {
+        let Some(this) = ssl.ex_data(NewSocket::<SSL>::tls_socket_slot()) else {
             return Ok(None);
         };
         // Same handlers-presence guard as every other dispatch entry point:
@@ -157,7 +157,7 @@ impl<const SSL: bool> boringssl_sys::AlpnSelectCallback for TlsSocketAlpnSelect<
                 // Exited (and, at loop entry, checkpointed) when this block ends or
                 // returns, before the loop state is restored.
                 let _scope = ScopeExit {
-                    socket: this,
+                    socket: this.get(),
                     scope: Some(handlers.enter()),
                 };
                 let global = handlers.global_object;
@@ -238,9 +238,6 @@ impl<const SSL: bool> boringssl_sys::AlpnSelectCallback for TlsSocketAlpnSelect<
         }
     }
 }
-
-/// The `SSL` app-data slot `on_open` points back at the owning socket.
-const TLS_SOCKET_EX_DATA: c_int = 0;
 
 // ──────────────────────────────────────────────────────────────────────────
 // NewSocket<SSL>
@@ -440,6 +437,16 @@ impl<const SSL: bool> NewSocket<SSL> {
 
     /// Take the [`io_ref`](Self::io_ref) for the native owner now pointing at
     /// this socket.
+    /// The per-`SSL` ex-data slot `on_open` points back at the owning socket
+    /// through (read by the ALPN select callback).
+    fn tls_socket_slot() -> &'static boringssl_sys::ExDataSlot<Self> {
+        static TCP: boringssl_sys::ExDataSlot<NewSocket<false>> = boringssl_sys::ExDataSlot::new();
+        static TLS: boringssl_sys::ExDataSlot<NewSocket<true>> = boringssl_sys::ExDataSlot::new();
+        let slot: &'static dyn core::any::Any = if SSL { &TLS } else { &TCP };
+        slot.downcast_ref()
+            .expect("SSL selects the matching static")
+    }
+
     pub(crate) fn hold_io_ref(this: ThisPtr<Self>) {
         Self::adopt_io_ref(RefPtr::from_this(this));
     }
@@ -1330,7 +1337,7 @@ impl<const SSL: bool> NewSocket<SSL> {
     /// `debug_assert!` to catch.
     pub(crate) fn detach_for_reconnect(this: ThisPtr<Self>) {
         let old = this.socket.get();
-        if !old.write_ext::<Option<ThisPtr<Self>>>(None) {
+        if !old.set_ext_owner::<Self>(None) {
             return;
         }
         this.socket.set(SocketHandler::<SSL>::DETACHED);
@@ -1464,7 +1471,7 @@ impl<const SSL: bool> NewSocket<SSL> {
                         && (this.protos.get().is_some()
                             || !this.get_handlers().on_alpn_callback().is_empty())
                     {
-                        ssl.set_ex_data_ref(TLS_SOCKET_EX_DATA, Some(this.get()));
+                        ssl.set_ex_data(Self::tls_socket_slot(), Some(BackRef::new(this.get())));
                         SSL_CTX::opaque_ref(tls_socket_functions::ffi::SSL_get_SSL_CTX(ssl))
                             .set_alpn_select_callback::<TlsSocketAlpnSelect<SSL>>();
                     }
@@ -1488,7 +1495,7 @@ impl<const SSL: bool> NewSocket<SSL> {
             }
         }
 
-        socket.write_ext(Some(this));
+        socket.set_ext_owner(Some(this.into()));
 
         let handlers = this.get_handlers();
         let global = handlers.global_object;

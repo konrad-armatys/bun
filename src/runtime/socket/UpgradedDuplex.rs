@@ -42,10 +42,12 @@ pub(crate) struct UpgradedDuplex {
     /// The container holding self as `.upgrade`, set right after it is
     /// allocated; events go to its `on_*` entry points.
     pub owner: Cell<Option<BackRef<DuplexUpgradeContext, Mut>>>,
-    pub on_data_callback: Cell<JSValue>,
-    pub on_end_callback: Cell<JSValue>,
-    pub on_writable_callback: Cell<JSValue>,
-    pub on_close_callback: Cell<JSValue>,
+    /// The `origin` listener thunks handed to JS; their context is `self`, and
+    /// dropping the handle (in `teardown`) neuters them.
+    on_data_callback: JsCell<Option<host_fn::ContextFunction>>,
+    on_end_callback: JsCell<Option<host_fn::ContextFunction>>,
+    on_writable_callback: JsCell<Option<host_fn::ContextFunction>>,
+    on_close_callback: JsCell<Option<host_fn::ContextFunction>>,
     pub event_loop_timer: JsCell<EventLoopTimer>,
     pub current_timeout: Cell<u32>,
     /// Transport bytes that arrived before the TLS engine existed.
@@ -104,17 +106,18 @@ use crate::jsc_hooks::timer_all_mut as timer_all;
 #[inline]
 fn lazy_js_handler<H: host_fn::ContextHostFn<Context = UpgradedDuplex>>(
     this: &UpgradedDuplex,
-    shadow: &Cell<JSValue>,
+    shadow: &JsCell<Option<host_fn::ContextFunction>>,
     set_slot: fn(JSValue, &JSGlobalObject, JSValue),
     global: &JSGlobalObject,
 ) -> JSValue {
-    if !shadow.get().is_empty() {
-        return shadow.get();
+    if let Some(f) = shadow.get().as_ref() {
+        return f.value();
     }
-    let callback = host_fn::new_function_with_context::<H>(global, None, 0, this);
+    let f = host_fn::ContextFunction::new::<H>(global, None, 0, this);
+    let callback = f.value();
     callback.ensure_still_alive();
     set_slot(this.js_wrapper, global, callback);
-    shadow.set(callback);
+    shadow.set(Some(f));
     callback
 }
 
@@ -368,10 +371,10 @@ impl UpgradedDuplex {
             wrapper: JsCell::new(None),
             owner: Cell::new(None),
             ssl_error: JsCell::new(CertError::default()),
-            on_data_callback: Cell::new(JSValue::ZERO),
-            on_end_callback: Cell::new(JSValue::ZERO),
-            on_writable_callback: Cell::new(JSValue::ZERO),
-            on_close_callback: Cell::new(JSValue::ZERO),
+            on_data_callback: JsCell::new(None),
+            on_end_callback: JsCell::new(None),
+            on_writable_callback: JsCell::new(None),
+            on_close_callback: JsCell::new(None),
             event_loop_timer: JsCell::new(EventLoopTimer::init_paused(
                 EventLoopTimerTag::UpgradedDuplex,
             )),
@@ -633,11 +636,7 @@ impl UpgradedDuplex {
             &self.on_writable_callback,
             &self.on_close_callback,
         ] {
-            let value = cb.get();
-            if !value.is_empty() {
-                host_fn::set_function_data(value, None);
-                cb.set(JSValue::ZERO);
-            }
+            cb.set(None);
         }
         self.ssl_error.set(CertError::default());
         self.pending_data.set(Vec::new());

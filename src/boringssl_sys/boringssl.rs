@@ -262,6 +262,39 @@ unsafe extern "C" {
 #[repr(transparent)]
 pub struct OwnedSslCtx(core::ptr::NonNull<SSL_CTX>);
 
+/// A typed `SSL` ex-data index: allocated once (per `static`) with
+/// `SSL_get_ex_new_index`, so distinct slots never alias and everything read
+/// through a slot was written as the same `T`.
+pub struct ExDataSlot<T> {
+    index: std::sync::OnceLock<c_int>,
+    _marker: core::marker::PhantomData<fn() -> T>,
+}
+
+impl<T> ExDataSlot<T> {
+    pub const fn new() -> Self {
+        ExDataSlot {
+            index: std::sync::OnceLock::new(),
+            _marker: core::marker::PhantomData,
+        }
+    }
+
+    fn index(&self) -> c_int {
+        *self.index.get_or_init(|| {
+            // SAFETY: no argp/callbacks; BoringSSL just hands out the next index.
+            let i = unsafe {
+                SSL_get_ex_new_index(0, core::ptr::null_mut(), core::ptr::null_mut(), None, None)
+            };
+            assert!(i >= 0, "SSL_get_ex_new_index failed");
+            i
+        })
+    }
+}
+
+// SAFETY: holds only an index.
+unsafe impl<T> Sync for ExDataSlot<T> {}
+// SAFETY: holds only an index.
+unsafe impl<T> Send for ExDataSlot<T> {}
+
 impl OwnedSslCtx {
     /// Takes the +1 `raw` carries; `None` when `raw` is null.
     ///
@@ -514,23 +547,24 @@ impl SSL {
         unsafe { SSL_set_alpn_protos(self, protos.as_ptr(), protos.len()) }
     }
 
-    /// Store a back-pointer to `data` in ex-data slot `idx` (0 is the app-data
-    /// slot). The holder obligation is the usual back-reference one: `data`
-    /// outlives this `SSL`, or the slot is overwritten first. Returns whether
-    /// BoringSSL accepted the write.
-    pub fn set_ex_data_ref<T>(&self, idx: c_int, data: Option<&T>) -> bool {
+    /// Store a back-reference to `data` in `slot`. The `BackRef` obligation
+    /// applies to the connection: `data` outlives this `SSL`, or the slot is
+    /// cleared first. Returns whether BoringSSL accepted the write.
+    pub fn set_ex_data<T>(&self, slot: &ExDataSlot<T>, data: Option<bun_ptr::BackRef<T>>) -> bool {
         let p = data.map_or(core::ptr::null_mut(), |r| {
-            core::ptr::from_ref(r).cast_mut().cast()
+            r.as_const_ptr().cast_mut().cast()
         });
         // SAFETY: `self` is live; BoringSSL stores `p` opaquely.
-        unsafe { SSL_set_ex_data(core::ptr::from_ref(self).cast_mut(), idx, p) == 1 }
+        unsafe { SSL_set_ex_data(core::ptr::from_ref(self).cast_mut(), slot.index(), p) == 1 }
     }
 
-    /// Read back the pointer stored with [`set_ex_data_ref::<T>`](Self::set_ex_data_ref).
-    pub fn ex_data_ref<T>(&self, idx: c_int) -> Option<&T> {
-        // SAFETY: `self` is live; a non-null slot was written by
-        // `set_ex_data_ref::<T>` under its outlives-the-SSL contract.
-        unsafe { SSL_get_ex_data(self, idx).cast::<T>().as_ref() }
+    /// Read back what [`set_ex_data`](Self::set_ex_data) stored in `slot`.
+    pub fn ex_data<T>(&self, slot: &ExDataSlot<T>) -> Option<bun_ptr::BackRef<T>> {
+        // SAFETY: `self` is live; `slot`'s index is only ever written through
+        // `set_ex_data::<T>`, so a non-null value is a `BackRef<T>`.
+        let p = unsafe { SSL_get_ex_data(self, slot.index()) }.cast::<T>();
+        // SAFETY: non-null values in this slot are `BackRef<T>`s (see above).
+        (!p.is_null()).then(|| unsafe { bun_ptr::BackRef::from_raw(p) })
     }
 
     /// The peer's leaf certificate, borrowed from this SSL's cert chain.
@@ -1058,6 +1092,13 @@ unsafe extern "C" {
     pub fn SSL_get_SSL_CTX(ssl: *const SSL) -> *mut SSL_CTX;
     pub fn SSL_get_ex_data(ssl: *const SSL, idx: c_int) -> *mut c_void;
     pub fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, data: *mut c_void) -> c_int;
+    pub fn SSL_get_ex_new_index(
+        argl: core::ffi::c_long,
+        argp: *mut c_void,
+        unused: *mut c_void,
+        dup_unused: Option<unsafe extern "C" fn()>,
+        free_func: Option<unsafe extern "C" fn()>,
+    ) -> c_int;
     pub fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> c_int;
     pub fn SSL_set_alpn_protos(ssl: *mut SSL, protos: *const u8, protos_len: usize) -> c_int;
     pub fn SSL_get0_alpn_selected(ssl: *const SSL, out_data: *mut *const u8, out_len: *mut c_uint);

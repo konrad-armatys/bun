@@ -42,7 +42,7 @@ pub struct HTTPContext<const SSL: bool> {
     /// `SSL_CTX*` built from this context's SSLConfig (or the default
     /// `request_cert=1` opts). One owned ref; `SSL_CTX_free` on deinit.
     /// Only meaningful when `SSL`.
-    pub(crate) secure: Option<*mut SSL_CTX>,
+    pub(crate) secure: Option<bun_boringssl_sys::OwnedSslCtx>,
     /// HTTP/2 sessions with at least one active stream, available for
     /// concurrent attachment if `hasHeadroom()`.
     // Raw pointers; the intrusive refcount (bumped on insert, dropped on
@@ -474,7 +474,7 @@ impl<const SSL: bool> HTTPContext<SSL> {
         if !SSL {
             unreachable!();
         }
-        self.secure.unwrap()
+        self.secure.as_ref().unwrap().as_ptr()
     }
 
     pub(crate) fn init_with_client_config(
@@ -500,7 +500,7 @@ impl<const SSL: bool> HTTPContext<SSL> {
         debug_assert!(SSL, "ssl only");
         let mut err = uws::create_bun_socket_error_t::none;
         self.secure = match opts.create_ssl_context(&mut err) {
-            Some(ctx) => Some(ctx.into_raw()),
+            Some(ctx) => Some(ctx),
             None => {
                 return Err(match err {
                     uws::create_bun_socket_error_t::load_ca_file => InitError::LoadCAFile,
@@ -561,8 +561,7 @@ impl<const SSL: bool> HTTPContext<SSL> {
                     ..Default::default()
                 }
                 .create_ssl_context(&mut err)
-                .unwrap()
-                .into_raw(),
+                .unwrap(),
             );
             // SAFETY: secure was just set to Some.
             unsafe { ssl_ctx_setup(self.ssl_ctx()) };
@@ -816,7 +815,9 @@ impl<const SSL: bool> HTTPContext<SSL> {
         let socket = HTTPSocket::<SSL>::connect_unix_group(
             &mut self.group,
             Self::KIND,
-            if SSL { self.secure } else { None },
+            self.secure
+                .as_ref()
+                .map(bun_boringssl_sys::OwnedSslCtx::as_ptr),
             socket_path,
             ActiveSocket::<SSL>::init(
                 client
@@ -981,7 +982,9 @@ impl<const SSL: bool> HTTPContext<SSL> {
         let socket = HTTPSocket::<SSL>::connect_group(
             &mut self.group,
             Self::KIND,
-            if SSL { self.secure } else { None },
+            self.secure
+                .as_ref()
+                .map(bun_boringssl_sys::OwnedSslCtx::as_ptr),
             hostname,
             port as c_int,
             ActiveSocket::<SSL>::init(
@@ -1061,12 +1064,8 @@ impl<const SSL: bool> Drop for HTTPContext<SSL> {
             // SAFETY: group was init()'d in `init`/`init_with_opts`; HTTP-thread-only.
             unsafe { uws::SocketGroup::destroy(&raw mut self.group) };
         }
-        if SSL {
-            if let Some(c) = self.secure {
-                // SAFETY: we own one ref on the SSL_CTX.
-                unsafe { bun_boringssl_sys::SSL_CTX_free(c) };
-            }
-        }
+        // After the group is gone: releases our SSL_CTX ref.
+        drop(self.secure.take());
     }
 }
 
