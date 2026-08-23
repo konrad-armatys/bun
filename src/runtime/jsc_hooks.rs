@@ -194,15 +194,21 @@ pub(crate) fn timer_all_mut() -> &'static mut timer::All {
     unsafe { &mut (*state).timer }
 }
 
+/// Runs `f` against this thread's in-process cron job list (`None` before the
+/// runtime state exists). A callback rather than a `&'static mut`, which two
+/// callers could hold at once; `f` must not re-enter anything that reaches the
+/// list.
 #[inline]
-pub(crate) fn cron_jobs_mut() -> Option<&'static mut Vec<bun_ptr::RefPtr<crate::api::cron::CronJob>>>
-{
+pub(crate) fn with_cron_jobs<R>(
+    f: impl FnOnce(&mut Vec<bun_ptr::RefPtr<crate::api::cron::CronJob>>) -> R,
+) -> Option<R> {
     let state = runtime_state();
     if state.is_null() {
         return None;
     }
-    // SAFETY: live boxed per-thread `RuntimeState`; single JS thread.
-    Some(unsafe { &mut (*state).cron_jobs })
+    // SAFETY: live boxed per-thread `RuntimeState`; single JS thread; the
+    // borrow ends when `f` returns.
+    Some(f(unsafe { &mut (*state).cron_jobs }))
 }
 
 #[inline]
