@@ -775,8 +775,8 @@ thread_local! {
     static BATCH_SEGMENTS: RefCell<Vec<BatchSegment>> = const { RefCell::new(Vec::new()) };
     // Reused iovec scratch for the vectored flush.
     static BATCH_IOVECS: RefCell<Vec<bun_uws_sys::UsIoVec>> = const { RefCell::new(Vec::new()) };
-    /// The parser whose bytes CORK_BUFFER currently holds. Invariant, kept by `cork`, `uncork`
-    /// and `release_refs_stranded_by_exit` (the only writers): `p.cork_ref.is_some()` ⇔
+    /// The parser whose bytes CORK_BUFFER currently holds. Invariant, kept by `cork`, `uncork`,
+    /// `displace_cork` and `release_refs_stranded_by_exit` (the only writers): `p.cork_ref.is_some()` ⇔
     /// `CORKED_H2 == Some(p)` — so the owner is alive while it is here and the back-reference
     /// is always live.
     static CORKED_H2: Cell<Option<BackRef<H2FrameParser, bun_ptr::Root>>> = const { Cell::new(None) };
@@ -2326,26 +2326,55 @@ impl H2FrameParser {
 
     /// Take the cork slot for this parser, first flushing whoever holds it.
     fn cork(&self) {
-        // Flushing the current owner writes, which can re-enter JS and cork this or yet another
-        // session; re-read the slot after each flush and only take it once it is free, so no
-        // session's corked bytes are ever dropped.
-        loop {
-            match CORKED_H2.get() {
-                // already corked (possibly from inside a forced uncork below)
-                Some(corked) if std::ptr::eq(corked.as_const_ptr(), self) => return,
-                // force uncork
-                Some(corked) => {
-                    corked.uncork();
-                }
-                None => break,
+        match CORKED_H2.get() {
+            // already corked
+            Some(corked) if std::ptr::eq(corked.as_const_ptr(), self) => return,
+            // force uncork: flush the foreign owner once (may run JS)
+            Some(corked) => {
+                corked.uncork();
             }
+            None => {}
         }
+        // That flush can re-enter JS and cork this or yet another session before we resume.
+        match CORKED_H2.get() {
+            Some(corked) if std::ptr::eq(corked.as_const_ptr(), self) => return,
+            Some(corked) => corked.displace_cork(),
+            None => {}
+        }
+        debug_assert!(CORKED_H2.get().is_none());
         CORKED_H2.set(Some(self.this_ptr().into()));
         let prev = self.cork_ref.replace(Some(self.new_ref()));
         debug_assert!(prev.is_none(), "cork_ref already held");
         self.register_auto_flush();
         bun_output::scoped_log!(H2FrameParser, "cork {:p}", self);
         CORK_OFFSET.with(|c| c.set(0));
+    }
+
+    /// Give up the cork slot without writing (so without running JS): the corked bytes move to
+    /// the end of this parser's own `write_buffer` — where `uncork()`'s `_write` would have queued
+    /// them under backpressure — and its own flush (auto-flush stays registered) sends them.
+    fn displace_cork(&self) {
+        debug_assert!(self.is_corked());
+        // Only ever non-empty between a producer's back-to-back chunks, never across sessions.
+        debug_assert!(BATCH_BUFFER.with_borrow(|b| b.is_empty()));
+        bun_output::scoped_log!(H2FrameParser, "displace cork {:p}", self);
+        let off = CORK_OFFSET.with(|c| c.get()) as usize;
+        if off != 0 {
+            CORK_BUFFER.with_borrow(|buf| {
+                let _ = self.write_buffer.with_mut(|wb| wb.write(&buf[0..off]));
+            });
+            self.global().vm().deprecated_report_extra_memory(off);
+            if matches!(self.native_socket.get(), BunSocket::None) {
+                // Later `_write`s queue behind these bytes instead of overtaking them in JS.
+                self.has_nonnative_backpressure.set(true);
+            }
+            self.register_auto_flush();
+        }
+        CORKED_H2.set(None);
+        CORK_OFFSET.with(|c| c.set(0));
+        if let Some(r) = self.cork_ref.take() {
+            r.deref();
+        }
     }
 
     pub(crate) fn generic_flush<S: NativeSocketWrite>(&self, mut socket: S) -> usize {

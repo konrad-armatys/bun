@@ -1996,90 +1996,25 @@ it("http2 session.goaway() opaqueData survives re-entrant buffer detach over a J
   expect(exitCode).toBe(0);
 }, 15_000);
 
-it("http2 session over a JS Duplex whose _write re-enters the session (ping) frees its native parser", async () => {
-  // The transport's _write runs synchronously under the parser's uncork/flush; a frame
-  // serialized from inside it (session.ping()) re-corks the same parser mid-uncork. The cork
-  // slot's ref must be handed off cleanly across that re-entry: debug builds assert the slot
-  // is free when a cork takes it (stderr stays empty), and the sessions must still tear down.
+it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep the cork slot consistent", async () => {
+  // The transport's _write runs synchronously under a parser's uncork/flush, and user code
+  // there can serialize a frame on this or another session, re-taking the thread's cork slot
+  // mid-handover. Debug builds assert the slot's ref is never double-installed (stderr stays
+  // empty); every session's byte stream must stay whole frames; and the sessions tear down.
   const fixture = `
     const http2 = require("node:http2");
     const { Duplex } = require("node:stream");
     const { heapStats } = require("bun:jsc");
     const count = () => heapStats().objectTypeCounts.H2FrameParser ?? 0;
-    Bun.gc(true);
-    const baseline = count();
-    const N = 5;
-    for (let i = 0; i < N; i++) {
-      let session;
-      let pings = 0;
-      const duplex = new Duplex({
-        read() {},
-        write(chunk, enc, cb) {
-          if (session && pings < 20) {
-            pings++;
-            session.ping(Buffer.alloc(8), () => {});
-          }
-          cb();
-        },
+    const connected = session =>
+      new Promise((resolve, reject) => {
+        session.once("connect", resolve);
+        session.once("error", reject);
+        session.once("close", () => reject(new Error("closed before connect")));
       });
-      session = http2.connect("http://127.0.0.1:1", { createConnection: () => duplex });
-      session.on("error", () => {});
-      await new Promise(r => session.once("connect", r));
-      session.settings({ enablePush: false });
-      const req = session.request({ ":path": "/" });
-      req.on("error", () => {});
-      req.end();
-      await new Promise(r => setImmediate(r));
-      if (pings === 0) throw new Error("transport _write never re-entered the session");
-      session.destroy();
-      await new Promise(r => setImmediate(r));
-      duplex.destroy();
-      session = undefined;
-    }
-    // Two sessions over JS transports: B's _write emits a frame on A, so A corks itself from
-    // inside the forced uncork of B that A's own cork() started.
-    for (let i = 0; i < N; i++) {
-      let a, b;
-      let crossPings = 0;
-      const mk = onWrite =>
-        new Duplex({
-          read() {},
-          write(chunk, enc, cb) {
-            onWrite();
-            cb();
-          },
-        });
-      const da = mk(() => {});
-      const db = mk(() => {
-        if (a && crossPings < 20) {
-          crossPings++;
-          a.ping(Buffer.alloc(8), () => {});
-        }
-      });
-      a = http2.connect("http://127.0.0.1:1", { createConnection: () => da });
-      b = http2.connect("http://127.0.0.1:1", { createConnection: () => db });
-      a.on("error", () => {});
-      b.on("error", () => {});
-      await Promise.all([new Promise(r => a.once("connect", r)), new Promise(r => b.once("connect", r))]);
-      for (let j = 0; j < 5; j++) {
-        // interleave frames on both sessions within one tick so each corks over the other
-        a.settings({ enablePush: false });
-        b.settings({ enablePush: false });
-        b.ping(Buffer.alloc(8), () => {});
-        a.ping(Buffer.alloc(8), () => {});
-        await new Promise(r => setImmediate(r));
-      }
-      if (crossPings === 0) throw new Error("B's transport _write never re-entered A");
-      a.destroy();
-      b.destroy();
-      await new Promise(r => setImmediate(r));
-      da.destroy();
-      db.destroy();
-      a = b = undefined;
-    }
-    // The bytes a session put on its transport: the client preface, then whole frames only
-    // (9-byte header + declared length, known type), nothing interleaved mid-frame.
-    const assertWellFormed = (name, chunks) => {
+    const tick = () => new Promise(r => setImmediate(r));
+    // preface, then whole frames only (9-byte header + declared length, known type)
+    const assertWellFormed = (name, chunks, min) => {
       const all = Buffer.concat(chunks);
       const preface = Buffer.from("PRI * HTTP/2.0" + String.fromCharCode(13, 10, 13, 10) + "SM" + String.fromCharCode(13, 10, 13, 10));
       if (!all.subarray(0, preface.length).equals(preface)) throw new Error(name + ": bad preface");
@@ -2094,51 +2029,127 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
         off += 9 + len;
         frames++;
       }
-      if (frames < 10) throw new Error(name + ": only " + frames + " frames");
+      if (frames < min) throw new Error(name + ": only " + frames + " frames");
+      return frames;
     };
-    // Three sessions: A corks while B owns the slot; flushing B re-enters JS and B's _write
-    // emits a frame on C, so C takes the slot before A's cork() resumes.
+    const transport = (wire, onWrite) =>
+      new Duplex({
+        read() {},
+        write(chunk, enc, cb) {
+          wire.push(Buffer.from(chunk));
+          onWrite();
+          cb();
+        },
+      });
+    Bun.gc(true);
+    const baseline = count();
+    const N = 3;
+
+    // (1) one session whose transport pings the session itself
     for (let i = 0; i < N; i++) {
-      let a, b, c;
-      let crossPings = 0;
-      const wire = { a: [], b: [], c: [] };
-      const mk = (name, onWrite) =>
-        new Duplex({
-          read() {},
-          write(chunk, enc, cb) {
-            wire[name].push(Buffer.from(chunk));
-            onWrite();
-            cb();
-          },
-        });
-      const da = mk("a", () => {});
-      const dc = mk("c", () => {});
-      const db = mk("b", () => {
-        if (c && crossPings < 20) {
-          crossPings++;
-          c.ping(Buffer.alloc(8), () => {});
+      let session;
+      let pings = 0;
+      const wire = [];
+      const duplex = transport(wire, () => {
+        if (session && pings < 20) {
+          pings++;
+          session.ping(Buffer.alloc(8), () => {});
+        }
+      });
+      session = http2.connect("http://127.0.0.1:1", { createConnection: () => duplex });
+      await connected(session);
+      session.on("error", () => {});
+      session.settings({ enablePush: false });
+      const req = session.request({ ":path": "/" });
+      req.on("error", () => {});
+      req.end();
+      await tick();
+      if (pings === 0) throw new Error("transport _write never re-entered the session");
+      assertWellFormed("self", wire, 3);
+      session.destroy();
+      await tick();
+      duplex.destroy();
+    }
+
+    // (2) two sessions: B's transport pings A
+    for (let i = 0; i < N; i++) {
+      let a, b;
+      let cross = 0;
+      const wa = [], wb = [];
+      const da = transport(wa, () => {});
+      const db = transport(wb, () => {
+        if (a && cross < 20) {
+          cross++;
+          a.ping(Buffer.alloc(8), () => {});
         }
       });
       a = http2.connect("http://127.0.0.1:1", { createConnection: () => da });
       b = http2.connect("http://127.0.0.1:1", { createConnection: () => db });
-      c = http2.connect("http://127.0.0.1:1", { createConnection: () => dc });
-      for (const s of [a, b, c]) s.on("error", () => {});
-      await Promise.all([a, b, c].map(s => new Promise(r => s.once("connect", r))));
+      await Promise.all([connected(a), connected(b)]);
+      for (const s of [a, b]) s.on("error", () => {});
       for (let j = 0; j < 5; j++) {
+        a.settings({ enablePush: false });
+        b.settings({ enablePush: false });
         b.ping(Buffer.alloc(8), () => {});
         a.ping(Buffer.alloc(8), () => {});
-        c.settings({ enablePush: false });
-        b.settings({ enablePush: false });
-        a.settings({ enablePush: false });
-        await new Promise(r => setImmediate(r));
+        await tick();
       }
-      if (crossPings === 0) throw new Error("B's transport _write never re-entered C");
-      for (const name of ["a", "b", "c"]) assertWellFormed(name, wire[name]);
-      for (const s of [a, b, c]) s.destroy();
-      await new Promise(r => setImmediate(r));
-      for (const d of [da, db, dc]) d.destroy();
-      a = b = c = undefined;
+      if (cross === 0) throw new Error("B's transport _write never re-entered A");
+      assertWellFormed("a", wa, 5);
+      assertWellFormed("b", wb, 5);
+      for (const s of [a, b]) s.destroy();
+      await tick();
+      for (const d of [da, db]) d.destroy();
     }
+
+    // (3) a cycle with no cap: B's transport pings C and C's pings B, while A writes 50 frames.
+    // Every A frame corks A, which forces the slot away from B or C; that flush re-enters and
+    // hands the slot to the other one before A resumes.
+    for (let i = 0; i < N; i++) {
+      let a, b, c;
+      let live = false;
+      let bc = 0, cb = 0;
+      const wa = [], wb = [], wc = [];
+      const da = transport(wa, () => {});
+      // ping(): corked without a synchronous flush, and uncapped here, so the only thing
+      // bounding the B<->C exchange is the cork handover itself.
+      const emit = s => s.ping(Buffer.alloc(8), () => {});
+      const opts = d => ({ createConnection: () => d, maxOutstandingPings: 1e9 });
+      const db = transport(wb, () => {
+        if (live) {
+          bc++;
+          emit(c);
+        }
+      });
+      const dc = transport(wc, () => {
+        if (live) {
+          cb++;
+          emit(b);
+        }
+      });
+      a = http2.connect("http://127.0.0.1:1", opts(da));
+      b = http2.connect("http://127.0.0.1:1", opts(db));
+      c = http2.connect("http://127.0.0.1:1", opts(dc));
+      await Promise.all([a, b, c].map(connected));
+      for (const s of [a, b, c]) s.on("error", () => {});
+      live = true;
+      emit(b);
+      for (let j = 0; j < 50; j++) {
+        emit(a);
+        if (j % 10 === 9) await tick();
+      }
+      await tick();
+      live = false;
+      await tick();
+      if (bc === 0 || cb === 0) throw new Error("B/C transports never re-entered each other: " + bc + "/" + cb);
+      const fa = assertWellFormed("a", wa, 50);
+      assertWellFormed("b", wb, 5);
+      assertWellFormed("c", wc, 5);
+      for (const s of [a, b, c]) s.destroy();
+      await tick();
+      for (const d of [da, db, dc]) d.destroy();
+    }
+
     let live = -1;
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 10));
@@ -2159,7 +2170,7 @@ it("http2 session over a JS Duplex whose _write re-enters the session (ping) fre
   expect(stderr).toBe("");
   expect(JSON.parse(stdout.trim())).toEqual({ live: 0 });
   expect(exitCode).toBe(0);
-}, 30_000);
+}, 60_000);
 
 it("http2 padded DATA write survives a re-entrant stream write from a JS Duplex _write", async () => {
   // With padding enabled, a single-frame DATA write that crosses the 16 KiB cork boundary
