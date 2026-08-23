@@ -1996,6 +1996,68 @@ it("http2 session.goaway() opaqueData survives re-entrant buffer detach over a J
   expect(exitCode).toBe(0);
 }, 15_000);
 
+it("http2 session over a JS Duplex whose _write re-enters the session (ping) frees its native parser", async () => {
+  // The transport's _write runs synchronously under the parser's uncork/flush; a frame
+  // serialized from inside it (session.ping()) re-corks the same parser mid-uncork. The cork
+  // slot's ref must be handed off cleanly across that re-entry: debug builds assert the slot
+  // is free when a cork takes it (stderr stays empty), and the sessions must still tear down.
+  const fixture = `
+    const http2 = require("node:http2");
+    const { Duplex } = require("node:stream");
+    const { heapStats } = require("bun:jsc");
+    const count = () => heapStats().objectTypeCounts.H2FrameParser ?? 0;
+    Bun.gc(true);
+    const baseline = count();
+    const N = 5;
+    for (let i = 0; i < N; i++) {
+      let session;
+      let pings = 0;
+      const duplex = new Duplex({
+        read() {},
+        write(chunk, enc, cb) {
+          if (session && pings < 20) {
+            pings++;
+            session.ping(Buffer.alloc(8), () => {});
+          }
+          cb();
+        },
+      });
+      session = http2.connect("http://127.0.0.1:1", { createConnection: () => duplex });
+      session.on("error", () => {});
+      await new Promise(r => session.once("connect", r));
+      session.settings({ enablePush: false });
+      const req = session.request({ ":path": "/" });
+      req.on("error", () => {});
+      req.end();
+      await new Promise(r => setImmediate(r));
+      if (pings === 0) throw new Error("transport _write never re-entered the session");
+      session.destroy();
+      await new Promise(r => setImmediate(r));
+      duplex.destroy();
+      session = undefined;
+    }
+    let live = -1;
+    for (let i = 0; i < 50; i++) {
+      await new Promise(r => setTimeout(r, 10));
+      Bun.gc(true);
+      live = count() - baseline;
+      if (live <= 0) break;
+    }
+    console.log(JSON.stringify({ live }));
+    process.exit(0);
+  `;
+  await using proc = Bun.spawn({
+    cmd: [bunExe(), "-e", fixture],
+    env: bunEnv,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+  expect(stderr).toBe("");
+  expect(JSON.parse(stdout.trim())).toEqual({ live: 0 });
+  expect(exitCode).toBe(0);
+}, 30_000);
+
 it("http2 padded DATA write survives a re-entrant stream write from a JS Duplex _write", async () => {
   // With padding enabled, a single-frame DATA write that crosses the 16 KiB cork boundary
   // flushes the cork into the JS transport mid-frame (onWrite → Duplex _write). A transport

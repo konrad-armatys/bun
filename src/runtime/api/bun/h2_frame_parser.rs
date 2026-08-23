@@ -2334,7 +2334,8 @@ impl H2FrameParser {
         }
         // cork
         CORKED_H2.set(Some(self.this_ptr().into()));
-        self.cork_ref.set(Some(self.new_ref()));
+        let prev = self.cork_ref.replace(Some(self.new_ref()));
+        debug_assert!(prev.is_none(), "cork_ref already held");
         self.register_auto_flush();
         bun_output::scoped_log!(H2FrameParser, "cork {:p}", self);
         CORK_OFFSET.with(|c| c.set(0));
@@ -2699,6 +2700,9 @@ impl H2FrameParser {
         self.unregister_auto_flush();
         bun_output::scoped_log!(H2FrameParser, "uncork {:p}", self);
         CORKED_H2.set(None);
+        // The slot is free from here, so a `cork()` re-entered from `_write` below takes a fresh
+        // `cork_ref`; ours is released once the corked bytes are out.
+        let held = self.cork_ref.take();
 
         // _write can re-enter JS (JS-stream-backed sockets, h2-over-h2 tunnels),
         // so no thread-local borrow may be held across it: move the corked bytes
@@ -2716,7 +2720,7 @@ impl H2FrameParser {
                 *b = data;
             }
         });
-        drop(self.cork_ref.take());
+        drop(held);
         n
     }
 
@@ -2724,7 +2728,9 @@ impl H2FrameParser {
         if self.auto_flusher.get().registered.get() {
             return;
         }
-        self.auto_flush_ref.set(Some(self.new_ref()));
+        let prev = self.auto_flush_ref.replace(Some(self.new_ref()));
+        debug_assert!(prev.is_none(), "auto_flush_ref already held");
+
         AutoFlusher::register_deferred_microtask_with_type(self, self.global_this.bun_vm());
     }
 
@@ -7283,8 +7289,10 @@ impl H2FrameParser {
         // caller's `socket_js`; it strictly outlives the returned `BunSocket` via the
         // attach/detach refcount protocol (see `BunSocket` docs).
         if socket.has_native_callback() {
-            self.writeonly_socket_ref
-                .set(Some(writeonly_ref(RefPtr::from_this(socket))));
+            let prev = self
+                .writeonly_socket_ref
+                .replace(Some(writeonly_ref(RefPtr::from_this(socket))));
+            debug_assert!(prev.is_none(), "writeonly_socket_ref already held");
             writeonly(socket.into())
         } else {
             let attached_now = socket.attach_native_callback(NativeCallbacks::H2(self.new_ref()));
