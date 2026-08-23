@@ -283,8 +283,8 @@ impl WindowsNamedPipeContext {
         };
         match_socket!(socket, |s: NewSocket<SSL>| {
             let failed = NewSocket::handle_connect_error(s, errno, 0);
-            // Release the +1 ref taken in `create()`.
-            s.deref();
+            // Release the ref taken in `create()`.
+            s.release_named_pipe_ref();
             failed
         });
     }
@@ -308,8 +308,8 @@ impl WindowsNamedPipeContext {
         };
         match_socket!(socket, |s: NewSocket<SSL>| {
             let closed = NewSocket::on_close(s, socket_from_named_pipe::<SSL>(pipe), 0, None);
-            // Release the +1 ref taken in `create()`.
-            s.deref();
+            // Release the ref taken in `create()`.
+            s.release_named_pipe_ref();
             closed
         });
         // SAFETY: `this` is the live ctx pointer registered in create();
@@ -429,7 +429,7 @@ impl WindowsNamedPipeContext {
 
             // Take a +1 intrusive ref so the wrapped JS socket outlives this context.
             match_socket!(socket, |s: NewSocket<SSL>| {
-                s.ref_();
+                NewSocket::hold_named_pipe_ref(s);
                 Ok(())
             });
 
@@ -520,7 +520,7 @@ impl Drop for WindowsNamedPipeContext {
             core::mem::replace(&mut self.socket, SocketType::None),
             // +1 ref taken in `create()`; this is the matching release.
             |s: NewSocket<SSL>| {
-                s.deref();
+                s.release_named_pipe_ref();
                 Ok(())
             }
         );

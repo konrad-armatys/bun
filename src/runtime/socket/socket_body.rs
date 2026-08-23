@@ -272,6 +272,14 @@ pub struct NewSocket<const SSL: bool> {
 
     pub(crate) flags: Cell<Flags>,
     pub(crate) ref_count: bun_ptr::RefCount<Self>,
+    /// The ref held on behalf of whatever native owner currently points at
+    /// this socket — the uSockets ext slot (accept / connect, from
+    /// `connect_finish` until close or connect error), the `DuplexUpgradeContext`
+    /// or `upgradeTLS` twin that drives it. Released by the close /
+    /// connect-error / reconnect paths via [`release_io_ref`](Self::release_io_ref).
+    pub(crate) io_ref: Cell<Option<RefPtr<Self>>>,
+    /// Windows: the ref `WindowsNamedPipeContext` holds on the socket it wraps.
+    pub(crate) named_pipe_ref: Cell<Option<RefPtr<Self>>>,
     /// The callbacks this socket dispatches to: shared with its listener and
     /// sibling sockets (server), or with its own reconnects and TLS twin
     /// (client). `None` once the socket has gone idle or been detached, which
@@ -314,8 +322,8 @@ pub struct NewSocket<const SSL: bool> {
 pub(super) type SocketHandler<const SSL: bool> = uws::NewSocketHandler<SSL>;
 
 /// Settles `IS_ACTIVE` against the `Handlers` the close callback entered with —
-/// it may have synchronously reconnected onto a fresh set — then consumes the
-/// +1 the caller transferred into `on_close`.
+/// it may have synchronously reconnected onto a fresh set — then releases the
+/// owner's `io_ref`.
 struct CloseTeardown<const SSL: bool> {
     socket: bun_ptr::ThisPtr<NewSocket<SSL>>,
     entered: Rc<Handlers>,
@@ -333,7 +341,7 @@ impl<const SSL: bool> Drop for CloseTeardown<SSL> {
             self.entered.mark_inactive();
         }
         // Last: this can be the final ref, freeing the socket read above.
-        this.deref();
+        this.release_io_ref();
     }
 }
 
@@ -376,7 +384,7 @@ impl<const SSL: bool> Drop for ConnectErrorTeardown<SSL> {
         // cannot free the socket here: `handle_connect_error`'s `_guard`
         // is declared before this guard, so it outlives it.
         if self.needs_deref {
-            this.deref();
+            this.release_io_ref();
         }
         if this.handlers_are(&self.entered) {
             this.mark_inactive();
@@ -411,10 +419,42 @@ impl<const SSL: bool> NewSocket<SSL> {
         self.flags.set(v);
     }
 
-    // Refcount: `ThisPtr::ref_()` takes a ref on behalf of an untyped holder
-    // (the uSockets ext slot, an in-flight connect, a native consumer) and
-    // `ThisPtr::deref()` releases one; the JS wrapper's own ref is released by
-    // `finalize`.
+    /// Take the [`io_ref`](Self::io_ref) for the native owner now pointing at
+    /// this socket.
+    pub(crate) fn hold_io_ref(this: ThisPtr<Self>) {
+        Self::adopt_io_ref(RefPtr::from_this(this));
+    }
+
+    /// Move an owner's ref into [`io_ref`](Self::io_ref) ahead of a dispatch
+    /// that releases it (`on_close`, `handle_connect_error`).
+    pub(crate) fn adopt_io_ref(owner: RefPtr<Self>) -> ThisPtr<Self> {
+        let this = owner.this_ptr();
+        let prev = this.io_ref.replace(Some(owner));
+        debug_assert!(prev.is_none(), "NewSocket io_ref already held");
+        this
+    }
+
+    /// Release the [`io_ref`](Self::io_ref), if held. May free `self`;
+    /// nothing may touch it afterwards.
+    pub(crate) fn release_io_ref(&self) {
+        if let Some(r) = self.io_ref.take() {
+            r.deref();
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn hold_named_pipe_ref(this: ThisPtr<Self>) {
+        let prev = this.named_pipe_ref.replace(Some(RefPtr::from_this(this)));
+        debug_assert!(prev.is_none(), "NewSocket named_pipe_ref already held");
+    }
+
+    /// See [`release_io_ref`](Self::release_io_ref).
+    #[cfg(windows)]
+    pub(crate) fn release_named_pipe_ref(&self) {
+        if let Some(r) = self.named_pipe_ref.take() {
+            r.deref();
+        }
+    }
 
     // ── codegen accessors ──
     // `#[bun_jsc::JsClass]` can't express the per-monomorphisation symbol
@@ -469,10 +509,11 @@ impl<const SSL: bool> NewSocket<SSL> {
         }
     }
 
-    /// Heap-allocates the socket; ownership passes to the intrusive refcount.
-    /// The returned handle is live by construction.
-    pub(crate) fn new(init: Self) -> bun_ptr::ThisPtr<Self> {
-        RefPtr::new(init).into_this_ptr()
+    /// Heap-allocates the socket. The returned ref is the one the JS wrapper
+    /// adopts (`get_this_value` → `to_js`; released by `finalize`): hand it
+    /// over with `into_this_ptr()` once the wrapper exists.
+    pub(crate) fn new(init: Self) -> RefPtr<Self> {
+        RefPtr::new(init)
     }
 
     pub(crate) fn memory_cost(&self) -> usize {
@@ -1287,7 +1328,7 @@ impl<const SSL: bool> NewSocket<SSL> {
                 }
             }
         }
-        this.deref();
+        this.release_io_ref();
     }
 
     pub(crate) fn mark_inactive(&self) {
@@ -1965,7 +2006,7 @@ impl<const SSL: bool> NewSocket<SSL> {
         if !this.has_handlers() {
             this.detach_native_callback();
             this.socket.set(SocketHandler::<SSL>::DETACHED);
-            this.deref();
+            this.release_io_ref();
             return Ok(());
         }
         let handlers = this.get_handlers();
@@ -1984,12 +2025,12 @@ impl<const SSL: bool> NewSocket<SSL> {
         // here, then retire it. `raw.twin == None` so this doesn't
         // recurse, and `onClose` derefs the +1 we took at creation.
         if let Some(raw) = this.twin.with_mut(|t| t.take()) {
-            // `on_close` consumes the twin's +1 via its `CloseTeardown`, so
-            // hand over the raw pointer rather than letting `RefPtr::drop`
-            // release it a second time. This frame is the twin's trampoline for
-            // the event, so what its handlers left pending is folded here and
-            // this socket's own close proceeds regardless.
-            crate::dispatch::fold(Self::on_close(raw.into_this_ptr(), socket, err, reason));
+            // `on_close` releases the twin's ref via its `CloseTeardown`, so
+            // hand it over as the twin's `io_ref`. This frame is the twin's
+            // trampoline for the event, so what its handlers left pending is
+            // folded here and this socket's own close proceeds regardless.
+            let raw = Self::adopt_io_ref(raw);
+            crate::dispatch::fold(Self::on_close(raw, socket, err, reason));
         }
         let cleanup = CloseTeardown {
             socket: this,
@@ -3003,7 +3044,7 @@ impl<const SSL: bool> NewSocket<SSL> {
             if !matches!(this.this_value.get(), JsRef::Finalized) {
                 this.this_value.with_mut(|r| r.downgrade());
             }
-            this.deref();
+            this.release_io_ref();
         }
         Ok(JSValue::UNDEFINED)
     }
@@ -3070,10 +3111,10 @@ impl<const SSL: bool> NewSocket<SSL> {
             if !matches!(this.this_value.get(), JsRef::Finalized) {
                 this.this_value.with_mut(|r| r.downgrade());
             }
-            // Balance `connect_finish`'s `socket_ref.ref_()`. The JS wrapper
-            // we were called through holds the remaining +1, so refcount
-            // stays ≥ 1 across this call.
-            this.deref();
+            // Release `connect_finish`'s `io_ref`. The JS wrapper we were
+            // called through holds the remaining +1, so refcount stays >= 1
+            // across this call.
+            this.release_io_ref();
         }
         Ok(JSValue::UNDEFINED)
     }
@@ -3388,8 +3429,10 @@ impl<const SSL: bool> NewSocket<SSL> {
         let mut initial_flags = Flags::initial(reject_unauthorized);
         initial_flags.set(Flags::DEFERS_SERVER_IDENTITY, defers_server_identity);
         initial_flags.set(Flags::TLS_SERVER_ROLE, is_server);
-        let tls: bun_ptr::ThisPtr<TLSSocket> = TLSSocket::new(TLSSocket {
+        let tls_owned = TLSSocket::new(TLSSocket {
             ref_count: bun_ptr::RefCount::init(),
+            io_ref: Cell::new(None),
+            named_pipe_ref: Cell::new(None),
             handlers: JsCell::new(Some(handlers)),
             socket: Cell::new(SocketHandler::<true>::DETACHED),
             owned_ssl_ctx: JsCell::new(owned_ctx),
@@ -3409,6 +3452,7 @@ impl<const SSL: bool> NewSocket<SSL> {
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
         });
+        let tls: ThisPtr<TLSSocket> = tls_owned.this_ptr();
         // Never shadow this with a long-lived borrow: it would alias the
         // reference dispatch materialises from the ext slot during
         // `on_open`/`start_tls_handshake`.
@@ -3445,7 +3489,7 @@ impl<const SSL: bool> NewSocket<SSL> {
                 let _clear_err = ClearErrorQueue(err != 0);
                 // Sole owner of the fresh allocation: this drops the owned_ctx
                 // ref and the handlers `Rc`.
-                tls.deref();
+                tls_owned.deref();
                 if err != 0 {
                     return Err(global.throw_value(boringssl_err_to_js(global, err)));
                 }
@@ -3480,7 +3524,11 @@ impl<const SSL: bool> NewSocket<SSL> {
         // Release the retired TCP wrapper's ext-slot ref on EVERY exit past this
         // point, including the `?` early-returns below; the JS wrapper's own +1
         // keeps the allocation alive across the whole call.
-        let _this_deref = this.adopt_guard();
+        let _this_deref = scopeguard::guard(this.io_ref.take(), |r| {
+            if let Some(r) = r {
+                r.deref();
+            }
+        });
         this.detach_native_callback();
         this.socket.set(SocketHandler::<SSL>::DETACHED);
 
@@ -3488,13 +3536,17 @@ impl<const SSL: bool> NewSocket<SSL> {
         *uws::us_socket_t::opaque_mut(new_raw.as_ptr()).ext() = Some(tls);
         tls.socket
             .set(SocketHandler::<true>::from(new_raw.as_ptr()));
-        tls.ref_();
+        // The ext slot's ref; the JS wrapper adopts the creation ref below.
+        TLSSocket::hold_io_ref(tls);
+        let _ = tls_owned.into_this_ptr();
 
         // The `raw` half — same `us_socket_t*`, ORIGINAL pre-upgrade
         // *Handlers, writes bypass SSL. Dispatch reaches it via the
         // `ssl_raw_tap` ciphertext hook, never via the ext slot.
         let raw = TLSSocket::new(TLSSocket {
             ref_count: bun_ptr::RefCount::init(),
+            io_ref: Cell::new(None),
+            named_pipe_ref: Cell::new(None),
             handlers: JsCell::new(raw_handlers),
             socket: Cell::new(SocketHandler::<true>::from(new_raw.as_ptr())),
             owned_ssl_ctx: JsCell::new(None),
@@ -3516,9 +3568,10 @@ impl<const SSL: bool> NewSocket<SSL> {
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
         });
-        let raw_ref = raw;
-        // The +1 `tls` holds on its twin.
-        tls.twin.set(Some(RefPtr::from_this(raw)));
+        let raw_ref = raw.this_ptr();
+        // `tls` holds a ref on its twin; the JS wrapper adopts the creation ref below.
+        tls.twin.set(Some(RefPtr::from_this(raw_ref)));
+        let _ = raw.into_this_ptr();
         // S008: `us_socket_t` is an `opaque_ffi!` ZST — safe deref.
         bun_opaque::opaque_deref_mut(new_raw.as_ptr()).set_ssl_raw_tap(true);
 
@@ -3878,7 +3931,7 @@ macro_rules! impl_socket_js_class {
             fn to_js(self, global: &JSGlobalObject) -> JSValue {
                 // The C++ wrapper adopts the creation reference (released via
                 // `${typeName}Class__finalize`).
-                let this = <$ty>::new(self);
+                let this = <$ty>::new(self).into_this_ptr();
                 <$ty>::to_js(&*this, global)
             }
             // `noConstructor: true` — no `${name}__getConstructor` export; trait default applies.
@@ -4213,7 +4266,7 @@ impl DuplexUpgradeContext {
             // teardown (after `handle_connect_error` downgrades it) is a
             // no-op on already-cleared shadows.
             this.upgrade.teardown();
-            let p = tls.into_this_ptr();
+            let p = TLSSocket::adopt_io_ref(tls);
             crate::dispatch::fold(TLSSocket::handle_connect_error(
                 p,
                 sys::SystemErrno::ECONNREFUSED as c_int,
@@ -4241,7 +4294,7 @@ impl DuplexUpgradeContext {
             // `UpgradedDuplex::on_close` → `call_write_or_end`) hits the null-check
             // in `on_error` instead of reading the Handlers that `TLSSocket::on_close`
             // → `mark_inactive` just released.
-            let p = tls.into_this_ptr();
+            let p = TLSSocket::adopt_io_ref(tls);
             crate::dispatch::fold(TLSSocket::on_close(p, socket, 0, None));
         }
 
@@ -4300,7 +4353,7 @@ impl DuplexUpgradeContext {
                         // is still strongly held, so the `deinit` → `Drop`
                         // teardown below is a no-op on already-cleared shadows.
                         this.upgrade.teardown();
-                        let p = tls.into_this_ptr();
+                        let p = TLSSocket::adopt_io_ref(tls);
                         crate::dispatch::fold(TLSSocket::handle_connect_error(p, errno, 0));
                     }
                     // `start_tls`/`start_tls_with_ctx` failed before the
@@ -4378,7 +4431,7 @@ impl DuplexUpgradeContext {
         if let Some(tls) = this.tls.replace(None) {
             let socket = this.duplex_socket();
             // `Err` is left pending for the release dispatcher's fold.
-            let _ = TLSSocket::on_close(tls.into_this_ptr(), socket, 0, None);
+            let _ = TLSSocket::on_close(TLSSocket::adopt_io_ref(tls), socket, 0, None);
         }
         Self::deinit(this);
     }
@@ -4545,6 +4598,8 @@ pub fn js_upgrade_duplex_to_tls(
         };
     let tls = TLSSocket::new(TLSSocket {
         ref_count: bun_ptr::RefCount::init(),
+        io_ref: Cell::new(None),
+        named_pipe_ref: Cell::new(None),
         handlers: JsCell::new(Some(handlers)),
         socket: Cell::new(SocketHandler::<true>::DETACHED),
         owned_ssl_ctx: JsCell::new(None),
@@ -4566,7 +4621,8 @@ pub fn js_upgrade_duplex_to_tls(
         twin: JsCell::new(None),
         verify_error: JsCell::new(None),
     });
-    let tls_ref = tls;
+    // The JS wrapper adopts the creation ref.
+    let tls_ref = tls.into_this_ptr();
     let tls_js_value = tls_ref.get_this_value(global);
     TLSSocket::data_set_cached(tls_js_value, global, default_data);
 
@@ -4583,8 +4639,8 @@ pub fn js_upgrade_duplex_to_tls(
     let duplex_context = OwnedThis::new(DuplexUpgradeContext {
         upgrade: UpgradedDuplex::from(global, tls_js_value, duplex),
         self_own: Cell::new(None),
-        // The owner's +1 on `tls`, consumed by its close / connect-error path.
-        tls: JsCell::new(Some(RefPtr::from_this(tls))),
+        // The owner's ref on `tls`, released by its close / connect-error path.
+        tls: JsCell::new(Some(RefPtr::from_this(tls_ref))),
         vm: VirtualMachine::get(),
         task_event: Cell::new(EventState::StartTLS),
         queued: Cell::new(false),

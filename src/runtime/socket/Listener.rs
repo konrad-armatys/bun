@@ -612,6 +612,8 @@ impl Listener {
 
         let this_socket = NewSocket::<SSL>::new(NewSocket::<SSL> {
             ref_count: bun_ptr::RefCount::init(),
+            io_ref: Cell::new(None),
+            named_pipe_ref: Cell::new(None),
             handlers: JsCell::new(Some(Rc::clone(&listener.handlers))),
             socket: Cell::new(uws::NewSocketHandler::<SSL>::DETACHED),
             protos: JsCell::new(listener.protos.clone()),
@@ -630,8 +632,10 @@ impl Listener {
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
         });
-        let s = this_socket;
-        s.ref_();
+        // The named-pipe context's ref; the JS wrapper adopts the creation ref.
+        let s = this_socket.this_ptr();
+        NewSocket::hold_io_ref(s);
+        let _ = this_socket.into_this_ptr();
         // See `on_create`: each accepted named-pipe connection holds the loop
         // on its own so `conn.unref()` is meaningful.
         s.poll_ref.with_mut(|p| p.ref_(bun_io::js_vm_ctx()));
@@ -657,6 +661,8 @@ impl Listener {
 
         let this_socket = NewSocket::<SSL>::new(NewSocket::<SSL> {
             ref_count: bun_ptr::RefCount::init(),
+            io_ref: Cell::new(None),
+            named_pipe_ref: Cell::new(None),
             handlers: JsCell::new(Some(Rc::clone(&listener.handlers))),
             socket: Cell::new(socket),
             protos: JsCell::new(listener.protos.clone()),
@@ -676,8 +682,10 @@ impl Listener {
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
         });
-        let s = this_socket;
-        s.ref_();
+        // The ext slot's ref; the JS wrapper adopts the creation ref.
+        let s = this_socket.this_ptr();
+        NewSocket::hold_io_ref(s);
+        let this_socket = this_socket.into_this_ptr();
         // Each accepted socket holds the event loop on its own (same as a
         // client socket after `connect_finish`), so `conn.unref()` works and
         // `server.unref()`/`server.close()` don't tear out live connections'
@@ -1229,6 +1237,8 @@ impl Listener {
                     } else {
                         TLSSocket::new(TLSSocket {
                             ref_count: bun_ptr::RefCount::init(),
+                            io_ref: Cell::new(None),
+                            named_pipe_ref: Cell::new(None),
                             handlers: JsCell::new(Some(Rc::clone(&handlers))),
                             socket: Cell::new(uws::NewSocketHandler::<true>::DETACHED),
                             connection: JsCell::new(Some(connection)),
@@ -1248,6 +1258,8 @@ impl Listener {
                             twin: JsCell::new(None),
                             verify_error: JsCell::new(None),
                         })
+                        // The JS wrapper adopts the creation ref (`get_this_value` below).
+                        .into_this_ptr()
                     };
                     let tls_ref = tls;
                     tls_ref.reset_client_tls_flags(crate::socket::resolve_reject_unauthorized(
@@ -1267,7 +1279,7 @@ impl Listener {
                         default_data,
                     );
                     tls_ref.poll_ref.with_mut(|p| p.ref_(bun_io::js_vm_ctx()));
-                    tls_ref.ref_();
+                    TLSSocket::hold_io_ref(tls_ref);
 
                     // Transfer the borrowed CTX into the pipe's SSLWrapper. From
                     // here it owns the ref on every path (initWithCTX adopts on
@@ -1321,6 +1333,8 @@ impl Listener {
                     } else {
                         TCPSocket::new(TCPSocket {
                             ref_count: bun_ptr::RefCount::init(),
+                            io_ref: Cell::new(None),
+                            named_pipe_ref: Cell::new(None),
                             handlers: JsCell::new(Some(Rc::clone(&handlers))),
                             socket: Cell::new(uws::NewSocketHandler::<false>::DETACHED),
                             connection: JsCell::new(Some(connection)),
@@ -1338,6 +1352,8 @@ impl Listener {
                             twin: JsCell::new(None),
                             verify_error: JsCell::new(None),
                         })
+                        // The JS wrapper adopts the creation ref (`get_this_value` below).
+                        .into_this_ptr()
                     };
                     let tcp_ref = tcp;
                     tcp_ref.update_flags(|f| {
@@ -1346,7 +1362,7 @@ impl Listener {
                             socket_config.pause_on_connect,
                         )
                     });
-                    tcp_ref.ref_();
+                    TCPSocket::hold_io_ref(tcp_ref);
                     TCPSocket::data_set_cached(
                         tcp_ref.get_this_value(global),
                         global,
@@ -1567,6 +1583,8 @@ fn connect_finish<const IS_SSL: bool>(
     } else {
         NewSocket::<IS_SSL>::new(NewSocket::<IS_SSL> {
             ref_count: bun_ptr::RefCount::init(),
+            io_ref: Cell::new(None),
+            named_pipe_ref: Cell::new(None),
             handlers: JsCell::new(Some(handlers)),
             socket: Cell::new(uws::NewSocketHandler::<IS_SSL>::DETACHED),
             connection: JsCell::new(Some(connection)),
@@ -1584,10 +1602,12 @@ fn connect_finish<const IS_SSL: bool>(
             twin: JsCell::new(None),
             verify_error: JsCell::new(None),
         })
+        // The JS wrapper adopts the creation ref (`get_this_value` below).
+        .into_this_ptr()
     };
     // Either the caller's JS-owned socket (reconnect) or the fresh one above.
     let socket_ref = socket;
-    socket_ref.ref_();
+    NewSocket::hold_io_ref(socket_ref);
     NewSocket::<IS_SSL>::data_set_cached(socket_ref.get_this_value(global), global, default_data);
     // On the reuse-prev path, `prev.this_value` was downgraded to Weak by the
     // previous close's `mark_inactive()`. `get_this_value()` returns the
@@ -1673,8 +1693,8 @@ fn connect_finish<const IS_SSL: bool>(
             {
                 let this = socket;
                 let handled = NewSocket::<IS_SSL>::handle_connect_error(this, errno, 0);
-                // Balance the unconditional `socket_ref.ref_()` above.
-                this.deref();
+                // Release the `io_ref` taken above.
+                this.release_io_ref();
                 // A `connectError` handler that threw on this synchronous failure
                 // throws from `connect()`.
                 handled?;
