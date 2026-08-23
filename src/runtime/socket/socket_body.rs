@@ -3054,8 +3054,9 @@ impl<const SSL: bool> NewSocket<SSL> {
         // Capture the in-flight-connect state before close_and_detach() sets
         // DETACHED. Resetting a SEMI_SOCKET (Connected arm, handshake not yet
         // established) dispatches no terminal callback in us_socket_close, so
-        // on_close/mark_inactive never runs — balance connect_finish's ref_(),
-        // downgrade the Strong this_value, and release the event-loop ref here,
+        // on_close/mark_inactive never runs — release the `io_ref`
+        // connect_finish took, downgrade the Strong this_value, and release the
+        // event-loop ref here,
         // exactly as close() does. Without it those refs leak (LSan-caught).
         let socket = this.socket.get();
         let is_semi_connect = socket.socket.get().is_some() && !socket.is_established();
