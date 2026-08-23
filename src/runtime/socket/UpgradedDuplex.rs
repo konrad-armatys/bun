@@ -113,7 +113,7 @@ fn lazy_js_handler<H: host_fn::ContextHostFn<Context = UpgradedDuplex>>(
     if let Some(f) = shadow.get().as_ref() {
         return f.value();
     }
-    let f = host_fn::ContextFunction::new::<H>(global, None, 0, this);
+    let f = host_fn::ContextFunction::new::<H>(global, None, 0, BackRef::new(this));
     let callback = f.value();
     callback.ensure_still_alive();
     set_slot(this.js_wrapper, global, callback);

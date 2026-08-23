@@ -883,28 +883,29 @@ pub trait ContextHostFn {
     ) -> crate::JsResult<JSValue>;
 }
 
-/// A JS function created by [`ContextFunction::new`] whose data slot points at
-/// a native context. Dropping this handle clears the slot (later calls become
-/// no-ops returning `undefined`), so the context's owner holds it for as long
-/// as — and no longer than — the context lives. The JS function itself must be
-/// kept GC-reachable by its holder while this handle exists.
+/// A JS function created by [`ContextFunction::new`] whose data slot holds a
+/// [`BackRef`](bun_ptr::BackRef) to a native context. The function is the
+/// back-reference's holder: the context keeps this handle (whose `Drop` clears
+/// the slot, turning later calls into no-ops returning `undefined`) for as long
+/// as — and no longer than — it lives at that address. The JS function itself
+/// must be kept GC-reachable by its holder while this handle exists.
 pub struct ContextFunction(JSValue);
 
 impl ContextFunction {
-    /// Create a JS function that calls `H` with `ctx`.
+    /// Create a JS function that calls `H` with `ctx`'s pointee.
     #[track_caller]
     pub fn new<H: ContextHostFn>(
         global_object: &JSGlobalObject,
         symbol_name: Option<&ZigString>,
         arg_count: u32,
-        ctx: &H::Context,
+        ctx: bun_ptr::BackRef<H::Context>,
     ) -> Self {
         ContextFunction(new_function_with_data(
             global_object,
             symbol_name,
             arg_count,
             context_host_fn::<H>,
-            core::ptr::from_ref(ctx).cast_mut().cast(),
+            ctx.as_const_ptr().cast_mut().cast(),
         ))
     }
 
@@ -943,9 +944,9 @@ fn context_host_fn_body<H: ContextHostFn>(
     let global = bun_opaque::opaque_deref(global);
     let frame = bun_opaque::opaque_deref(frame);
     to_js_host_call(global, || match get_function_data(frame.callee()) {
-        // SAFETY: written by `ContextFunction::new::<H>` from a live
-        // `&H::Context`; the handle clears the slot when the context's owner
-        // drops it.
+        // SAFETY: written by `ContextFunction::new::<H>` from a
+        // `BackRef<H::Context>` whose holder (this function's handle, kept by
+        // the context) clears the slot before the context goes away.
         Some(ctx) => H::call(unsafe { &*ctx.cast::<H::Context>() }, global, frame),
         None => Ok(JSValue::UNDEFINED),
     })
