@@ -655,8 +655,9 @@ impl WindowsNamedPipe {
 
         if let Some(tls) = ssl_ctx {
             self.update_flags(|f| f.set(Flags::IS_SSL, true));
-            let tls_nn = NonNull::new(tls).expect("caller passes Some only for a live SSL_CTX*");
-            match WrapperType::init_with_ctx(tls_nn, false, self.wrapper_handlers()) {
+            // The listener keeps its own ref; the wrapper gets one to release on deinit.
+            let tls = boringssl::SSL_CTX::opaque_ref(tls).up_ref();
+            match WrapperType::init_with_owned_ctx(tls, false, self.wrapper_handlers()) {
                 Ok(w) => self.wrapper.set(Some(w)),
                 Err(_) => {
                     self.discard_unadopted_pipe();
@@ -667,11 +668,6 @@ impl WindowsNamedPipe {
                     });
                 }
             }
-            // ref because we are accepting will unref when wrapper deinit.
-            // SAFETY: `tls_nn` proven non-null above
-            // (`NonNull::new(tls).expect(..)`); `SSL_CTX_up_ref` only bumps the
-            // atomic refcount on a live `SSL_CTX*`.
-            let _ = unsafe { boringssl::SSL_CTX_up_ref(tls_nn.as_ptr()) };
         }
         #[cfg(windows)]
         {
@@ -718,7 +714,7 @@ impl WindowsNamedPipe {
         &self,
         fd: Fd,
         ssl_options: Option<SSLConfig>,
-        owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        owned_ctx: Option<boringssl::OwnedSslCtx>,
     ) -> bun_sys::Result<()> {
         debug_assert!(self.pipe.get().is_some());
         self.update_flags(|f| f.set(Flags::DISCONNECTED, true));
@@ -760,7 +756,7 @@ impl WindowsNamedPipe {
         &self,
         path: &[u8],
         ssl_options: Option<SSLConfig>,
-        owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        owned_ctx: Option<boringssl::OwnedSslCtx>,
     ) -> bun_sys::Result<()> {
         debug_assert!(self.pipe.get().is_some());
         self.update_flags(|f| f.set(Flags::DISCONNECTED, true));
@@ -811,7 +807,7 @@ impl WindowsNamedPipe {
         &self,
         _fd: Fd,
         _ssl_options: Option<SSLConfig>,
-        _owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        _owned_ctx: Option<boringssl::OwnedSslCtx>,
     ) -> bun_sys::Result<()> {
         // Unreachable on POSIX — `WindowsNamedPipeContext` is aliased to `()` there;
         // this stub exists only so the module type-checks across platforms.
@@ -823,7 +819,7 @@ impl WindowsNamedPipe {
         &self,
         _path: &[u8],
         _ssl_options: Option<SSLConfig>,
-        _owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        _owned_ctx: Option<boringssl::OwnedSslCtx>,
     ) -> bun_sys::Result<()> {
         // Unreachable on POSIX — see `open` above.
         unreachable!("WindowsNamedPipe::connect is windows-only")
@@ -840,16 +836,13 @@ impl WindowsNamedPipe {
     fn init_tls_wrapper(
         &self,
         ssl_options: Option<SSLConfig>,
-        owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        owned_ctx: Option<boringssl::OwnedSslCtx>,
     ) -> Option<bun_sys::Result<()>> {
         if let Some(ctx) = owned_ctx {
             self.update_flags(|f| f.set(Flags::IS_SSL, true));
-            let ctx_nn = NonNull::new(ctx).expect("caller passes Some only for a live SSL_CTX*");
-            match WrapperType::init_with_ctx(ctx_nn, true, self.wrapper_handlers()) {
+            match WrapperType::init_with_owned_ctx(ctx, true, self.wrapper_handlers()) {
                 Ok(w) => self.wrapper.set(Some(w)),
                 Err(_) => {
-                    // SAFETY: ctx is a valid SSL_CTX* with one adopted ref
-                    unsafe { boringssl::SSL_CTX_free(ctx) };
                     return Some(bun_sys::Result::Err(bun_sys::Error {
                         errno: bun_sys::E::EPIPE as _,
                         syscall: bun_sys::Tag::connect,

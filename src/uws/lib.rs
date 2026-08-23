@@ -370,6 +370,18 @@ pub mod ssl_wrapper {
     }
 
     impl<T: Copy> SSLWrapper<T> {
+        /// [`init_with_ctx`](Self::init_with_ctx) taking the reference as an
+        /// owned guard: adopted by the wrapper on success, released on error.
+        pub fn init_with_owned_ctx(
+            ctx: bun_boringssl::c::OwnedSslCtx,
+            is_client: bool,
+            handlers: Handlers<T>,
+        ) -> Result<Self, InitError> {
+            let this = Self::init_with_ctx(NonNull::from(ctx.ctx()), is_client, handlers)?;
+            let _ = ctx.into_raw();
+            Ok(this)
+        }
+
         /// Initialize the SSLWrapper with a specific SSL_CTX*, remember to
         /// call SSL_CTX_up_ref if you want to keep the SSL_CTX alive after
         /// the SSLWrapper is deinitialized.
@@ -512,19 +524,10 @@ pub mod ssl_wrapper {
             bun_boringssl::load();
 
             let mut err = crate::create_bun_socket_error_t::none;
-            let Some(ssl_ctx) = ctx_opts.create_ssl_context(&mut err).and_then(NonNull::new) else {
+            let Some(ssl_ctx) = ctx_opts.create_ssl_context(&mut err) else {
                 return Err(InitError::InvalidOptions);
             };
-            // init_with_ctx adopts the SSL_CTX* (one ref). The passphrase was
-            // already freed inside create_ssl_context, so SSL_CTX_free is
-            // sufficient on the error path.
-            let ctx_guard = scopeguard::guard(ssl_ctx, |c| {
-                // SAFETY: ssl_ctx ref was just created by create_ssl_context and not yet adopted by init_with_ctx.
-                unsafe { boring_sys::SSL_CTX_free(c.as_ptr()) };
-            });
-            let this = Self::init_with_ctx(ssl_ctx, is_client, handlers)?;
-            let _ = scopeguard::ScopeGuard::into_inner(ctx_guard);
-            Ok(this)
+            Self::init_with_owned_ctx(ssl_ctx, is_client, handlers)
         }
 
         /// Mirror `us_socket_adopt_tls`'s server-side `SSL_set_verify` override.

@@ -309,7 +309,8 @@ pub struct JSValkeyClient {
     pub(crate) _subscription_ctx: JsCell<SubscriptionCtx>,
     /// `us_ssl_ctx_t` for `tls: { …custom CA… }`. `tls: true` borrows
     /// `RareData.defaultClientSslCtx()` instead; `tls: false` leaves this null.
-    pub(crate) _secure: Cell<Option<*mut uws::SslCtx>>,
+    /// One ref on the custom-TLS `SSL_CTX`, reused across reconnects.
+    pub(crate) _secure: JsCell<Option<bun_boringssl_sys::OwnedSslCtx>>,
 
     pub(crate) timer: RefCountedTimer,
     pub(crate) reconnect_timer: RefCountedTimer,
@@ -766,7 +767,7 @@ impl JSValkeyClient {
             global_object,
             this_value: JsCell::new(JsRef::empty()),
             poll_ref: JsCell::new(KeepAlive::default()),
-            _secure: Cell::new(None),
+            _secure: JsCell::new(None),
             timer: RefCountedTimer::new(Timer::Tag::ValkeyConnectionTimeout),
             reconnect_timer: RefCountedTimer::new(Timer::Tag::ValkeyConnectionReconnect),
         }))
@@ -878,7 +879,7 @@ impl JSValkeyClient {
             global_object,
             this_value: JsCell::new(JsRef::empty()),
             poll_ref: JsCell::new(KeepAlive::default()),
-            _secure: Cell::new(None),
+            _secure: JsCell::new(None),
             timer: RefCountedTimer::new(Timer::Tag::ValkeyConnectionTimeout),
             reconnect_timer: RefCountedTimer::new(Timer::Tag::ValkeyConnectionReconnect),
         }))
@@ -1491,12 +1492,10 @@ impl JSValkeyClient {
                 // Per-VM weak cache: a `duplicate()`'d client (or any
                 // other client with the same config) hits the same
                 // `SSL_CTX*` instead of rebuilding.
-                let state = crate::jsc_hooks::runtime_state();
-                debug_assert!(!state.is_null(), "RuntimeState not installed");
-                // SAFETY: per-thread `RuntimeState`; `ssl_ctx_cache` has a
-                // stable address for the VM's lifetime, JS-thread-only.
-                let cache = unsafe { &mut (*state).ssl_ctx_cache };
-                self._secure.set(cache.get_or_create(custom, &mut err));
+                self._secure
+                    .set(crate::jsc_hooks::with_ssl_ctx_cache(|cache| {
+                        cache.get_or_create(custom, &mut err)
+                    }));
             }
             self._secure.get().is_none()
         } else {
@@ -1514,7 +1513,7 @@ impl JSValkeyClient {
         let ssl_ctx: Option<*mut uws::SslCtx> = match &self.client.get().tls {
             valkey::TLS::None => None,
             valkey::TLS::Enabled => Some(crate::jsc_hooks::default_client_ssl_ctx(vm)),
-            valkey::TLS::Custom(_) => Some(self._secure.get().unwrap()),
+            valkey::TLS::Custom(_) => Some(self._secure.get().as_ref().unwrap().as_ptr().cast()),
         };
 
         self.client_mut().status = valkey::Status::Connecting;
@@ -1630,10 +1629,8 @@ impl JSValkeyClient {
             debug_assert!(this_ref.client.get().socket.is_closed());
             debug_assert!(!this_ref.timer.ref_held.get());
             debug_assert!(!this_ref.reconnect_timer.ref_held.get());
-            if let Some(s) = this_ref._secure.get() {
-                // SAFETY: SSL_CTX is C-refcounted; this releases our ref.
-                unsafe { boringssl::c::SSL_CTX_free(s) };
-            }
+            // Releases our `SSL_CTX` ref.
+            this_ref._secure.set(None);
             this_ref.client_mut().shutdown(None);
             this_ref.poll_ref.with_mut(|r| r.disable());
             this_ref.stop_timers();

@@ -35,7 +35,8 @@ pub use crate::generated_classes::js_SecureContext as js;
 #[bun_jsc::JsClass]
 #[repr(C)]
 pub struct SecureContext {
-    pub ctx: *mut boringssl::SSL_CTX,
+    /// The one `SSL_CTX` reference this wrapper owns.
+    pub ctx: boringssl::OwnedSslCtx,
     /// `BunSocketContextOptions.digest()` — exactly the fields that reach
     /// `us_ssl_ctx_from_options`. Stored so an `intern()` WeakGCMap hit (keyed by
     /// the low 64 bits) can do a full content-equality check before reusing.
@@ -319,19 +320,11 @@ impl SecureContext {
         d: [u8; 32],
     ) -> JsResult<Box<SecureContext>> {
         let mut err = uws::create_bun_socket_error_t::none;
-        // Note: spec is `global.bunVM().rareData().sslCtxCache()`. In the
-        // Rust crate split, `bun_jsc::RareData::ssl_ctx_cache()` returns an
-        // opaque cycle-break stub; the concrete per-VM `SSLContextCache` lives
-        // on this crate's `RuntimeState` (one per JS thread, same lifetime as
-        // `RareData`). Reach it via the thread-local — same instance
-        // `Bun__RareData__sslCtxCache` hands out over FFI.
-        let state = crate::jsc_hooks::runtime_state();
-        debug_assert!(!state.is_null(), "RuntimeState not installed");
-        // SAFETY: `state` is the boxed per-thread `RuntimeState` installed by
-        // `init_runtime_state`; the embedded `ssl_ctx_cache` has a stable
-        // address for the VM's lifetime and is only touched from the JS thread.
-        let cache = unsafe { &mut (*state).ssl_ctx_cache };
-        let Some(ctx) = cache.get_or_create_digest(ctx_opts, d, &mut err) else {
+        // The per-VM `SSLContextCache` lives on this thread's `RuntimeState`
+        // (`bun_jsc::RareData::ssl_ctx_cache()` is an opaque cycle-break stub).
+        let Some(ctx) = crate::jsc_hooks::with_ssl_ctx_cache(|cache| {
+            cache.get_or_create_digest(ctx_opts, d, &mut err)
+        }) else {
             // `err` is only set for the input-validation paths (bad PEM, missing
             // file, …). When BoringSSL itself fails (e.g. unsupported curve) the
             // enum is still `.none`; surface the library error stack instead of
@@ -365,12 +358,8 @@ impl SecureContext {
     /// `SSL_CTX_up_ref` and return — for callers that want to outlive this
     /// wrapper's GC. Most paths just pass `this.ctx` directly and let `SSL_new`
     /// take its own ref.
-    pub(crate) fn borrow(&self) -> *mut boringssl::SSL_CTX {
-        unsafe {
-            // SAFETY: self.ctx is a valid SSL_CTX* held for the lifetime of this wrapper.
-            let _ = boringssl::SSL_CTX_up_ref(self.ctx);
-        }
-        self.ctx
+    pub(crate) fn borrow(&self) -> boringssl::OwnedSslCtx {
+        self.ctx.ctx().up_ref()
     }
 
     /// `secureContext.context._external` — Node exposes the SSL_CTX here as an
@@ -415,7 +404,10 @@ impl SecureContext {
         // SAFETY: `this.ctx` is the live SSL_CTX this object owns a reference
         // to, and `owned` is a NUL-terminated buffer valid for the call.
         let ok = unsafe {
-            c::us_ssl_ctx_add_ca_cert(this.ctx, owned.as_ptr().cast::<core::ffi::c_char>())
+            c::us_ssl_ctx_add_ca_cert(
+                this.ctx.as_ptr(),
+                owned.as_ptr().cast::<core::ffi::c_char>(),
+            )
         };
         if ok == 0 {
             return Err(global.throw(format_args!("Invalid CA certificate")));
@@ -428,8 +420,8 @@ impl SecureContext {
     // false positive on that contract.
     #[allow(clippy::boxed_local)]
     pub fn finalize(self: Box<Self>) {
-        // SAFETY: `ctx` was created by `SSL_CTX_new`; freed exactly once here.
-        unsafe { boringssl::SSL_CTX_free(self.ctx) };
+        // Dropping `ctx` releases our `SSL_CTX` reference.
+        drop(self);
     }
 
     pub(crate) fn memory_cost(&self) -> usize {

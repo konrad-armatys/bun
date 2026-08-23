@@ -500,7 +500,7 @@ impl<const SSL: bool> HTTPContext<SSL> {
         debug_assert!(SSL, "ssl only");
         let mut err = uws::create_bun_socket_error_t::none;
         self.secure = match opts.create_ssl_context(&mut err) {
-            Some(ctx) => Some(ctx),
+            Some(ctx) => Some(ctx.into_raw()),
             None => {
                 return Err(match err {
                     uws::create_bun_socket_error_t::load_ca_file => InitError::LoadCAFile,
@@ -561,7 +561,8 @@ impl<const SSL: bool> HTTPContext<SSL> {
                     ..Default::default()
                 }
                 .create_ssl_context(&mut err)
-                .unwrap(),
+                .unwrap()
+                .into_raw(),
             );
             // SAFETY: secure was just set to Some.
             unsafe { ssl_ctx_setup(self.ssl_ctx()) };

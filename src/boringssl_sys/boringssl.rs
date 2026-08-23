@@ -275,6 +275,11 @@ impl OwnedSslCtx {
         self.0.as_ptr()
     }
 
+    /// The context this reference keeps alive.
+    pub fn ctx(&self) -> &SSL_CTX {
+        SSL_CTX::opaque_ref(self.0.as_ptr())
+    }
+
     /// Transfers the reference back out; the caller must free it.
     pub fn into_raw(self) -> *mut SSL_CTX {
         core::mem::ManuallyDrop::new(self).0.as_ptr()
@@ -497,6 +502,37 @@ impl SSL {
         }
     }
 
+    /// `SSL_set_tlsext_host_name` — the SNI name to send in the ClientHello.
+    pub fn set_tlsext_host_name(&mut self, name: &core::ffi::CStr) -> c_int {
+        // SAFETY: `self` is live; BoringSSL copies the NUL-terminated `name`.
+        unsafe { SSL_set_tlsext_host_name(self, name.as_ptr()) }
+    }
+
+    /// `SSL_set_alpn_protos` — the client's wire-format ALPN list (copied).
+    pub fn set_alpn_protos(&mut self, protos: &[u8]) -> c_int {
+        // SAFETY: `self` is live; `protos` is readable for its length and copied.
+        unsafe { SSL_set_alpn_protos(self, protos.as_ptr(), protos.len()) }
+    }
+
+    /// Store a back-pointer to `data` in ex-data slot `idx` (0 is the app-data
+    /// slot). The holder obligation is the usual back-reference one: `data`
+    /// outlives this `SSL`, or the slot is overwritten first. Returns whether
+    /// BoringSSL accepted the write.
+    pub fn set_ex_data_ref<T>(&self, idx: c_int, data: Option<&T>) -> bool {
+        let p = data.map_or(core::ptr::null_mut(), |r| {
+            core::ptr::from_ref(r).cast_mut().cast()
+        });
+        // SAFETY: `self` is live; BoringSSL stores `p` opaquely.
+        unsafe { SSL_set_ex_data(core::ptr::from_ref(self).cast_mut(), idx, p) == 1 }
+    }
+
+    /// Read back the pointer stored with [`set_ex_data_ref::<T>`](Self::set_ex_data_ref).
+    pub fn ex_data_ref<T>(&self, idx: c_int) -> Option<&T> {
+        // SAFETY: `self` is live; a non-null slot was written by
+        // `set_ex_data_ref::<T>` under its outlives-the-SSL contract.
+        unsafe { SSL_get_ex_data(self, idx).cast::<T>().as_ref() }
+    }
+
     /// The peer's leaf certificate, borrowed from this SSL's cert chain.
     pub fn peer_leaf_certificate(&mut self) -> Option<&mut X509> {
         // SAFETY: the chain and its entries are owned by this SSL and outlive
@@ -509,6 +545,124 @@ impl SSL {
             sk_X509_value(cert_chain, 0).as_mut()
         }
     }
+}
+
+impl SSL_CTX {
+    /// `SSL_CTX_get_verify_mode`.
+    pub fn verify_mode(&self) -> c_int {
+        // SAFETY: `self` is live; read-only.
+        unsafe { SSL_CTX_get_verify_mode(self) }
+    }
+
+    /// Take another reference on this context.
+    pub fn up_ref(&self) -> OwnedSslCtx {
+        // SAFETY: `self` is live; the +1 is owned by the returned guard.
+        unsafe { SSL_CTX_up_ref(core::ptr::from_ref(self).cast_mut()) };
+        OwnedSslCtx(core::ptr::NonNull::from(self))
+    }
+
+    /// Install `H` as this context's server-side ALPN selection hook
+    /// (`SSL_CTX_set_alpn_select_cb`).
+    pub fn set_alpn_select_callback<H: AlpnSelectCallback>(&self) {
+        // SAFETY: `self` is live; the callback and null `arg` are stored opaquely.
+        unsafe {
+            SSL_CTX_set_alpn_select_cb(
+                core::ptr::from_ref(self).cast_mut(),
+                Some(alpn_select_thunk::<H>),
+                core::ptr::null_mut(),
+            )
+        }
+    }
+}
+
+/// A fatal `no_application_protocol` alert from an [`AlpnSelectCallback`].
+pub struct AlpnReject;
+
+/// Server-side ALPN selection (`SSL_CTX_set_alpn_select_cb`), with the
+/// pointer plumbing done once in this crate.
+pub trait AlpnSelectCallback {
+    /// `offered` is the client's wire-format protocol list (non-empty). Return
+    /// the chosen protocol as a sub-slice of `offered` (see
+    /// [`select_next_proto`]), `Ok(None)` to proceed without ALPN, or
+    /// `Err(AlpnReject)` to fail the handshake.
+    fn select<'o>(ssl: &SSL, offered: &'o [u8]) -> Result<Option<&'o [u8]>, AlpnReject>;
+}
+
+unsafe extern "C" fn alpn_select_thunk<H: AlpnSelectCallback>(
+    ssl: *mut SSL,
+    out: *mut *const u8,
+    out_len: *mut u8,
+    in_: *const u8,
+    in_len: c_uint,
+    _arg: *mut c_void,
+) -> c_int {
+    if ssl.is_null() || in_.is_null() || in_len == 0 {
+        return SSL_TLSEXT_ERR_NOACK;
+    }
+    // SAFETY: BoringSSL passes the live handshaking SSL and `in_len` bytes at `in_`.
+    let (ssl, offered) = unsafe {
+        (
+            SSL::opaque_ref(ssl),
+            core::slice::from_raw_parts(in_, in_len as usize),
+        )
+    };
+    match H::select(ssl, offered) {
+        Ok(Some(selected)) => {
+            let range = offered.as_ptr_range();
+            let sel = selected.as_ptr_range();
+            if selected.is_empty()
+                || selected.len() > usize::from(u8::MAX)
+                || sel.start < range.start
+                || sel.end > range.end
+            {
+                return SSL_TLSEXT_ERR_ALERT_FATAL;
+            }
+            // SAFETY: `out`/`out_len` are BoringSSL's out-params for this call;
+            // `selected` lies inside `offered`, which BoringSSL keeps alive
+            // until it has copied the selection.
+            unsafe {
+                *out = selected.as_ptr();
+                *out_len = selected.len() as u8;
+            }
+            SSL_TLSEXT_ERR_OK
+        }
+        Ok(None) => SSL_TLSEXT_ERR_NOACK,
+        Err(AlpnReject) => SSL_TLSEXT_ERR_ALERT_FATAL,
+    }
+}
+
+/// The entries of an RFC 7301 wire-format protocol list (`len | bytes`)*.
+/// Stops at the first malformed entry.
+pub fn alpn_protocols(list: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = list;
+    core::iter::from_fn(move || {
+        let (&len, tail) = rest.split_first()?;
+        let len = usize::from(len);
+        if len == 0 || tail.len() < len {
+            rest = &[];
+            return None;
+        }
+        let (proto, tail) = tail.split_at(len);
+        rest = tail;
+        Some(proto)
+    })
+}
+
+/// Whether `list` is a well-formed, non-empty RFC 7301 protocol list
+/// (`ssl_is_valid_alpn_list`).
+fn alpn_list_is_valid(list: &[u8]) -> bool {
+    !list.is_empty() && alpn_protocols(list).map(|p| p.len() + 1).sum::<usize>() == list.len()
+}
+
+/// `SSL_select_next_proto` for ALPN: the first protocol in `prefs` (wire
+/// format, in preference order) that `offered` also lists, returned as the
+/// matching entry of `offered`. `None` when either list is malformed or
+/// nothing overlaps.
+pub fn select_next_proto<'a>(prefs: &[u8], offered: &'a [u8]) -> Option<&'a [u8]> {
+    if !alpn_list_is_valid(prefs) || !alpn_list_is_valid(offered) {
+        return None;
+    }
+    alpn_protocols(prefs).find_map(|want| alpn_protocols(offered).find(|got| *got == want))
 }
 
 impl Drop for GeneralNames {

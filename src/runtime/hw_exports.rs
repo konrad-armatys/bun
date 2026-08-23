@@ -230,9 +230,10 @@ mod sql_hooks {
     ) -> *mut bun_uws::SslCtx {
         // SAFETY: `cache` is `&runtime_state().ssl_ctx_cache`.
         let cache = unsafe { &mut *cache.cast::<crate::api::SSLContextCache::SSLContextCache>() };
-        cache
-            .get_or_create_opts(opts, err)
-            .unwrap_or(core::ptr::null_mut())
+        cache.get_or_create_opts(opts, err).map_or(
+            core::ptr::null_mut(),
+            bun_boringssl_sys::OwnedSslCtx::into_raw,
+        )
     }
     unsafe fn ssl_config_from_js(global: &JSGlobalObject, value: JSValue) -> *mut c_void {
         use crate::socket::SSLConfigFromJs;

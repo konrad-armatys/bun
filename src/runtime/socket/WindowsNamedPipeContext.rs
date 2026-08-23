@@ -284,7 +284,7 @@ impl WindowsNamedPipeContext {
         match_socket!(socket, |s: NewSocket<SSL>| {
             let failed = NewSocket::handle_connect_error(s, errno, 0);
             // Release the +1 ref taken in `create()`.
-            s.get().deref();
+            s.deref();
             failed
         });
     }
@@ -309,7 +309,7 @@ impl WindowsNamedPipeContext {
         match_socket!(socket, |s: NewSocket<SSL>| {
             let closed = NewSocket::on_close(s, socket_from_named_pipe::<SSL>(pipe), 0, None);
             // Release the +1 ref taken in `create()`.
-            s.get().deref();
+            s.deref();
             closed
         });
         // SAFETY: `this` is the live ctx pointer registered in create();
@@ -454,7 +454,7 @@ impl WindowsNamedPipeContext {
         global_this: &JSGlobalObject,
         fd: Fd,
         ssl_config: Option<SSLConfig>,
-        owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        owned_ctx: Option<boringssl::OwnedSslCtx>,
         socket: SocketType,
     ) -> Result<*mut WindowsNamedPipe, crate::Error> {
         // TODO: reuse the same context for multiple connections when possibles
@@ -477,7 +477,7 @@ impl WindowsNamedPipeContext {
         global_this: &JSGlobalObject,
         path: &[u8],
         ssl_config: Option<SSLConfig>,
-        owned_ctx: Option<*mut boringssl::SSL_CTX>,
+        owned_ctx: Option<boringssl::OwnedSslCtx>,
         socket: SocketType,
     ) -> Result<*mut WindowsNamedPipe, crate::Error> {
         // TODO: reuse the same context for multiple connections when possibles
@@ -520,7 +520,7 @@ impl Drop for WindowsNamedPipeContext {
             core::mem::replace(&mut self.socket, SocketType::None),
             // +1 ref taken in `create()`; this is the matching release.
             |s: NewSocket<SSL>| {
-                s.get().deref();
+                s.deref();
                 Ok(())
             }
         );

@@ -171,10 +171,13 @@ impl BunSocketContextOptions {
     /// chain validation, populate verify_error) is applied in
     /// `us_internal_ssl_attach`, so a server reusing this ctx never sends
     /// CertificateRequest unless these options asked it to.
-    pub fn create_ssl_context(self, err: &mut create_bun_socket_error_t) -> Option<*mut SSL_CTX> {
-        // SAFETY: FFI call; `self` is `#[repr(C)]` and passed by value, `err` is a valid out-param.
-        let ctx = unsafe { c::us_ssl_ctx_from_options(self, err) };
-        if ctx.is_null() { None } else { Some(ctx) }
+    pub fn create_ssl_context(
+        self,
+        err: &mut create_bun_socket_error_t,
+    ) -> Option<bun_boringssl_sys::OwnedSslCtx> {
+        // SAFETY: FFI call; `self` is `#[repr(C)]` and passed by value, `err` is a
+        // valid out-param; a non-null result carries the one ref we now own.
+        unsafe { bun_boringssl_sys::OwnedSslCtx::from_raw(c::us_ssl_ctx_from_options(self, err)) }
     }
 
     /// SHA-256 over every field this struct carries, dereferencing string
