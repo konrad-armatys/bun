@@ -587,9 +587,13 @@ impl FileSink {
             ..FileSink::default_fields()
         }));
         LIVE_COUNT.fetch_add(1, Ordering::Relaxed);
-        // SAFETY: `this` was just allocated above and is the sole reference.
+        // SAFETY: `this` was just allocated above and is the sole reference;
+        // `pipe` is the Box-allocated `uv::Pipe` the caller hands over.
         unsafe {
-            (*this).writer.get_mut().set_pipe(pipe);
+            (*this)
+                .writer
+                .get_mut()
+                .set_pipe(bun_core::heap::take(pipe));
             (*this).writer.get_mut().set_parent(this);
         }
         this

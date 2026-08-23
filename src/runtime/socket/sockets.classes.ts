@@ -292,7 +292,7 @@ export default [
       },
 
       ref: {
-        fn: "ref",
+        fn: "jsRef",
         length: 0,
       },
       unref: {
@@ -364,7 +364,7 @@ export default [
         length: 1,
       },
       ref: {
-        fn: "ref",
+        fn: "jsRef",
         length: 0,
       },
       unref: {
