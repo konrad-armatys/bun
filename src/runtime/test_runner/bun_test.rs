@@ -1168,17 +1168,13 @@ impl BunTest {
 
         let vm = global_this.bun_vm().as_mut();
         if let Some(reporter) = junit_reporter {
-            vm.on_print_error_zig_exception =
-                Some(crate::cli::test_command::JunitReporter::record_failure_cb);
-            vm.on_print_error_zig_exception_ctx =
-                core::ptr::from_ref::<CommandLineReporter>(reporter)
-                    .cast_mut()
-                    .cast();
+            vm.on_print_error_zig_exception = Some(Box::new(move |exception| {
+                crate::cli::test_command::JunitReporter::record_failure_cb(reporter, exception)
+            }));
         }
         vm.run_error_handler(exception, None);
         if junit_reporter.is_some() {
             vm.on_print_error_zig_exception = None;
-            vm.on_print_error_zig_exception_ctx = core::ptr::null_mut();
         }
 
         if matches!(

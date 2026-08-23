@@ -1,6 +1,5 @@
 use bun_collections::VecExt;
 use core::sync::atomic::{AtomicU32, Ordering};
-use std::cell::Cell;
 use std::io::Write as _;
 
 use crate::api::bun_process::sync as spawn_sync;
@@ -31,11 +30,6 @@ use crate::cli::which_npm_client::NPMClient;
 // reaches back into `crate::cli::create_command::Example` via absolute path.
 #[path = "create/SourceFileProjectGenerator.rs"]
 pub mod SourceFileProjectGenerator;
-
-// PORTING.md §Global mutable state: single-thread CLI scratch buffer →
-// RacyCell. Touched on the main thread for `--open` *and* the spawned git
-// thread (sequenced — git thread writes after main is done with it).
-static BUN_PATH_BUF: bun_core::RacyCell<PathBuffer> = bun_core::RacyCell::new(PathBuffer::ZEROED);
 
 // bun.OSPathLiteral — `bun_paths` does not (yet) export an
 // `os_path_literal!` macro from this crate's POV. `OSPathSlice` is `[u8]` on
@@ -72,9 +66,6 @@ fn exec_task(task_: &[u8], cwd: &[u8], _path: &[u8], npm_client: Option<NPMClien
 
     let npm_args = 2 * usize::from(npm_client.is_some());
     let total = count + npm_args;
-    // `set_len` + index-write into uninitialized `&[u8]` slots is UB (invalid
-    // references exist before assignment). Build with `push` instead — same
-    // allocation, no unsafe.
     let mut argv: Vec<&[u8]> = Vec::with_capacity(total);
 
     if let Some(ref client) = npm_client {
@@ -128,33 +119,16 @@ fn exec_task(task_: &[u8], cwd: &[u8], _path: &[u8], npm_client: Option<NPMClien
     });
 }
 
-// We don't want to allocate memory each time
-// But we cannot print over an existing buffer or weird stuff will happen
-// so we keep two and switch between them
+// Progress node names must be `&'static [u8]`; `bun create` sets a handful per
+// run, so render into the process-lifetime CLI arena (main thread only).
 struct ProgressBuf;
 
 impl ProgressBuf {
-    thread_local! {
-        static BUFS: core::cell::RefCell<[[u8; 1024]; 2]> = const { core::cell::RefCell::new([[0u8; 1024]; 2]) };
-        static BUF_INDEX: Cell<usize> = const { Cell::new(0) };
-    }
-
     fn print(args: core::fmt::Arguments<'_>) -> crate::Result<&'static [u8]> {
-        Self::BUF_INDEX.with(|i| i.set(i.get() + 1));
-        let idx = Self::BUF_INDEX.with(|i| i.get()) % 2;
-        Self::BUFS.with_borrow_mut(|bufs| {
-            let buf = &mut bufs[idx];
-            let mut cursor: &mut [u8] = &mut buf[..];
-            let cap = cursor.len();
-            write!(&mut cursor, "{}", args)
-                .map_err(|_| crate::Error::Sys(bun_errno::SystemErrno::ENOSPC))?;
-            let written = cap - cursor.len();
-            // SAFETY: the slice points into a thread-local static buffer that
-            // lives for the thread's lifetime; CLI usage prints/copies it before
-            // the buffer is reused.
-            let out: &'static [u8] = unsafe { bun_ptr::detach_lifetime(&buf[..written]) };
-            Ok(out)
-        })
+        let mut buf: Vec<u8> = Vec::with_capacity(64);
+        buf.write_fmt(args)
+            .map_err(|_| crate::Error::Sys(bun_errno::SystemErrno::ENOSPC))?;
+        Ok(crate::cli::cli_dupe(&buf))
     }
 
     /// `pretty_fmt` post-processes the rendered payload, so callers bake the
@@ -198,7 +172,7 @@ impl CreateOptions {
         PARAMS
     }
 
-    fn parse(_ctx: &Command::Context<'_>) -> crate::Result<CreateOptions> {
+    fn parse(_ctx: &mut Command::ContextData) -> crate::Result<CreateOptions> {
         // The `is_verbose()` accessor reads the env directly each call, so this is a no-op.
         let _ = Output::is_verbose();
 
@@ -253,15 +227,13 @@ impl CreateOptions {
 }
 
 const BUN_CREATE_DIR: &[u8] = b".bun-create";
-// PORTING.md §Global mutable state: single-thread CLI scratch buffer → RacyCell.
-static HOME_DIR_BUF: bun_core::RacyCell<PathBuffer> = bun_core::RacyCell::new(PathBuffer::ZEROED);
 
 pub(crate) struct CreateCommand;
 
 impl CreateCommand {
     #[cold]
     pub(crate) fn exec(
-        ctx: &Command::Context<'_>,
+        ctx: &mut Command::ContextData,
         example_tag: ExampleTag,
         template: &[u8],
     ) -> crate::Result<()> {
@@ -278,8 +250,8 @@ impl CreateCommand {
             return CreateListExamplesCommand::exec(ctx);
         }
 
-        // SAFETY: `fs::FileSystem::init` returns a process-global singleton pointer.
-        let filesystem: &mut fs::FileSystem = unsafe { &mut *fs::FileSystem::init(None)? };
+        fs::FileSystem::init(None)?;
+        let filesystem: &fs::FileSystem = fs::FileSystem::get();
         let mut env_loader = DotEnv::Loader::init();
 
         env_loader.load_process()?;
@@ -301,12 +273,9 @@ impl CreateCommand {
             supports_ansi_escape_codes: Output::enable_ansi_colors_stderr(),
             ..Default::default()
         };
-        // `Progress::start` returns
-        // `&mut Node` borrowing `progress` exclusively for the node's lifetime.
-        // Convert to `*mut` immediately so `progress` and `node` can be used
-        // independently below (same pattern as `CreateListExamplesCommand::exec`
-        // at the bottom of this file).
-        let node: *mut ProgressNode = match example_tag {
+        // `Progress::start` returns `&mut progress.root`; the node is addressed
+        // as `progress.root` below so `progress.refresh()` can interleave.
+        match example_tag {
             ExampleTag::JslikeFile => progress.start(
                 ProgressBuf::print(format_args!("Analyzing {}", bstr::BStr::new(template)))?,
                 0,
@@ -316,25 +285,15 @@ impl CreateCommand {
                 0,
             ),
         };
-        // SAFETY: `node` is `&mut progress.root`; both live on this stack frame
-        // for all of `exec`. Laundering through `*mut` decouples the borrowck-
-        // tracked exclusive borrow of `progress` (Node already holds
-        // `*mut Progress` internally).
-        let node: &mut ProgressNode = unsafe { &mut *node };
 
         // alacritty is fast
         if env_loader.map.get(b"ALACRITTY_LOG").is_some() {
             progress.refresh_rate_ns = (bun_core::time::NS_PER_MS * 8) as u64;
         }
 
-        // Refresh the progress bar on exit. Capture `*mut Progress` so
-        // the guard does not hold an exclusive borrow for the whole fn body;
-        // `progress` is declared earlier so it is still alive when this drops.
-        let progress_ptr: *mut Progress = &raw mut progress;
-        let _refresh_on_exit = scopeguard::guard(progress_ptr, |p| {
-            // SAFETY: see note above — `progress` outlives this guard.
-            unsafe { (*p).refresh() };
-        });
+        // Refresh the progress bar on exit.
+        let mut progress = scopeguard::guard(&mut progress, |p| p.refresh());
+        let progress: &mut Progress = &mut progress;
 
         let mut package_json_contents: MutableString = MutableString::default();
         let mut package_json_file: Option<bun_sys::File> = None;
@@ -347,19 +306,19 @@ impl CreateCommand {
 
         match example_tag {
             ExampleTag::JslikeFile => {
-                return run_on_entry_point(ctx, example_tag, template, node);
+                return run_on_entry_point(ctx, example_tag, template, &mut progress.root);
             }
             ExampleTag::GithubRepository | ExampleTag::Official => {
                 let tarball_bytes: MutableString = match example_tag {
                     ExampleTag::Official => {
-                        match Example::fetch(ctx, &mut env_loader, template, &mut progress, node) {
+                        match Example::fetch(ctx, &mut env_loader, template, progress) {
                             Ok(b) => b,
                             Err(err) => {
                                 if matches!(
                                     err,
                                     crate::Error::HTTPForbidden | crate::Error::ExampleNotFound
                                 ) {
-                                    node.end();
+                                    progress.root.end();
                                     progress.refresh();
 
                                     pretty_error!(
@@ -377,7 +336,7 @@ impl CreateCommand {
                                     Example::print(&examples, Some(dirname));
                                     Global::exit(1);
                                 } else {
-                                    node.end();
+                                    progress.root.end();
                                     progress.refresh();
 
                                     pretty_errorln!("\n\n");
@@ -387,77 +346,73 @@ impl CreateCommand {
                             }
                         }
                     }
-                    ExampleTag::GithubRepository => match Example::fetch_from_github(
-                        ctx,
-                        &mut env_loader,
-                        template,
-                        &mut progress,
-                        node,
-                    ) {
-                        Ok(b) => b,
-                        Err(err) => {
-                            if matches!(
-                                err,
-                                crate::Error::HTTPForbidden | crate::Error::HTTPTooManyRequests
-                            ) {
-                                node.end();
-                                progress.refresh();
+                    ExampleTag::GithubRepository => {
+                        match Example::fetch_from_github(ctx, &mut env_loader, template, progress) {
+                            Ok(b) => b,
+                            Err(err) => {
+                                if matches!(
+                                    err,
+                                    crate::Error::HTTPForbidden | crate::Error::HTTPTooManyRequests
+                                ) {
+                                    progress.root.end();
+                                    progress.refresh();
 
-                                pretty_error!(
-                                    "\n<r><red>error:<r> GitHub returned {}. This usually means GitHub is rate limiting your requests.\nTo fix this, either:<r>  <b>A) pass a <r><cyan>GITHUB_ACCESS_TOKEN<r> environment variable to bun<r>\n  <b>B)Wait a little and try again<r>\n",
-                                    if matches!(err, crate::Error::HTTPForbidden) {
-                                        "403"
-                                    } else {
-                                        "429"
-                                    },
-                                );
-                                Global::crash();
-                            } else if matches!(err, crate::Error::GitHubIsDown) {
-                                node.end();
-                                progress.refresh();
+                                    pretty_error!(
+                                        "\n<r><red>error:<r> GitHub returned {}. This usually means GitHub is rate limiting your requests.\nTo fix this, either:<r>  <b>A) pass a <r><cyan>GITHUB_ACCESS_TOKEN<r> environment variable to bun<r>\n  <b>B)Wait a little and try again<r>\n",
+                                        if matches!(err, crate::Error::HTTPForbidden) {
+                                            "403"
+                                        } else {
+                                            "429"
+                                        },
+                                    );
+                                    Global::crash();
+                                } else if matches!(err, crate::Error::GitHubIsDown) {
+                                    progress.root.end();
+                                    progress.refresh();
 
-                                pretty_error!(
-                                    "\n<r><red>error:<r> GitHub returned a server error while fetching the tarball for <b>\"{}\"<r>. GitHub may be temporarily unavailable; wait a moment and try again.\n",
-                                    bstr::BStr::new(template),
-                                );
-                                Global::crash();
-                            } else if matches!(err, crate::Error::GitHubRepositoryNotFound) {
-                                node.end();
-                                progress.refresh();
+                                    pretty_error!(
+                                        "\n<r><red>error:<r> GitHub returned a server error while fetching the tarball for <b>\"{}\"<r>. GitHub may be temporarily unavailable; wait a moment and try again.\n",
+                                        bstr::BStr::new(template),
+                                    );
+                                    Global::crash();
+                                } else if matches!(err, crate::Error::GitHubRepositoryNotFound) {
+                                    progress.root.end();
+                                    progress.refresh();
 
-                                pretty_error!(
-                                    "\n<r><red>error:<r> <b>\"{}\"<r> was not found on GitHub. Here are templates you can use:\n\n",
-                                    bstr::BStr::new(template),
-                                );
-                                Output::flush();
+                                    pretty_error!(
+                                        "\n<r><red>error:<r> <b>\"{}\"<r> was not found on GitHub. Here are templates you can use:\n\n",
+                                        bstr::BStr::new(template),
+                                    );
+                                    Output::flush();
 
-                                let examples = Example::fetch_all_local_and_remote(
-                                    ctx,
-                                    None,
-                                    &mut env_loader,
-                                    filesystem,
-                                )?;
-                                Example::print(&examples, Some(dirname));
-                                Global::crash();
-                            } else {
-                                node.end();
-                                progress.refresh();
+                                    let examples = Example::fetch_all_local_and_remote(
+                                        ctx,
+                                        None,
+                                        &mut env_loader,
+                                        filesystem,
+                                    )?;
+                                    Example::print(&examples, Some(dirname));
+                                    Global::crash();
+                                } else {
+                                    progress.root.end();
+                                    progress.refresh();
 
-                                pretty_errorln!("\n\n");
+                                    pretty_errorln!("\n\n");
 
-                                return Err(err);
+                                    return Err(err);
+                                }
                             }
                         }
-                    },
+                    }
                     _ => unreachable!(),
                 };
 
-                node.name = ProgressBuf::print(format_args!(
+                progress.root.name = ProgressBuf::print(format_args!(
                     "Decompressing {}",
                     bstr::BStr::new(template)
                 ))?;
-                node.set_completed_items(0);
-                node.set_estimated_total_items(0);
+                progress.root.set_completed_items(0);
+                progress.root.set_estimated_total_items(0);
 
                 progress.refresh();
 
@@ -469,10 +424,10 @@ impl CreateCommand {
                 gunzip.read_all(true)?;
                 drop(gunzip);
 
-                node.name =
+                progress.root.name =
                     ProgressBuf::print(format_args!("Extracting {}", bstr::BStr::new(template)))?;
-                node.set_completed_items(0);
-                node.set_estimated_total_items(0);
+                progress.root.set_completed_items(0);
+                progress.root.set_estimated_total_items(0);
 
                 progress.refresh();
 
@@ -522,7 +477,7 @@ impl CreateCommand {
                     }
 
                     if archive_context.overwrite_list.count() > 0 {
-                        node.end();
+                        progress.root.end();
                         progress.refresh();
 
                         // Thank you create-react-app for this copy (and idea)
@@ -565,7 +520,7 @@ impl CreateCommand {
                     let plucker = &archive_context.pluckers[0];
 
                     if plucker.found && plucker.fd.is_valid() {
-                        node.name = b"Updating package.json";
+                        progress.root.name = b"Updating package.json";
                         progress.refresh();
 
                         package_json_contents = plucker.contents.clone()?;
@@ -576,7 +531,7 @@ impl CreateCommand {
             ExampleTag::LocalFolder => {
                 let template_parts = [template];
 
-                node.name = b"Copying files";
+                progress.root.name = b"Copying files";
                 progress.refresh();
 
                 let abs_template_path = filesystem.abs(&template_parts);
@@ -586,7 +541,7 @@ impl CreateCommand {
                 let template_dir = match bun_sys::Dir::open(abs_template_path) {
                     Ok(d) => d,
                     Err(err) => {
-                        node.end();
+                        progress.root.end();
                         progress.refresh();
 
                         pretty_errorln!(
@@ -602,7 +557,7 @@ impl CreateCommand {
                 let destination_dir__ = match bun_sys::Fd::cwd().make_open_path(destination) {
                     Ok(d) => d,
                     Err(err) => {
-                        node.end();
+                        progress.root.end();
                         progress.refresh();
 
                         pretty_errorln!(
@@ -647,8 +602,7 @@ impl CreateCommand {
                 file_copier_copy(
                     &destination_dir,
                     &mut walker_,
-                    node,
-                    &mut progress,
+                    progress,
                     #[cfg(windows)]
                     (dst_without_trailing_slash.len() + 1),
                     #[cfg(windows)]
@@ -675,7 +629,7 @@ impl CreateCommand {
                                 let stat = match pkg.stat() {
                                     Ok(s) => s,
                                     Err(err) => {
-                                        node.end();
+                                        progress.root.end();
                                         progress.refresh();
 
                                         package_json_file = None;
@@ -692,7 +646,7 @@ impl CreateCommand {
                                     || stat.st_size == 0
                                 {
                                     package_json_file = None;
-                                    node.end();
+                                    progress.root.end();
                                     progress.refresh();
                                     break 'read_package_json;
                                 }
@@ -716,7 +670,7 @@ impl CreateCommand {
                             pkg.pread_all(package_json_contents.list.as_mut_slice(), 0)
                         {
                             package_json_file = None;
-                            node.end();
+                            progress.root.end();
                             progress.refresh();
 
                             pretty_errorln!(
@@ -736,7 +690,7 @@ impl CreateCommand {
             }
         }
 
-        node.end();
+        progress.root.end();
         progress.refresh();
 
         let is_nextjs = false;
@@ -787,9 +741,7 @@ impl CreateCommand {
                     package_json_contents.list.as_slice(),
                 );
 
-                // SAFETY: single-threaded CLI dispatch; no other borrow of the
-                // process-static `Cli::LOG_` is live across this scope.
-                let log: &mut bun_ast::Log = unsafe { ctx.log_mut() };
+                let log: &mut bun_ast::Log = ctx.log_mut();
                 let bump: &'static bun_alloc::Arena = crate::cli::cli_arena();
                 let mut package_json_expr = match JSON::parse_utf8(&source, log, bump) {
                     Ok(e) => e,
@@ -820,13 +772,8 @@ impl CreateCommand {
 
                 if let Some(name_expr) = package_json_expr.as_property(b"name") {
                     if let Some(mut s) = name_expr.expr.data.e_string() {
-                        let basename = bun_paths::basename(destination);
-                        // SAFETY: `destination` is interned in the process-global DirnameStore
-                        // (`append_slice` returns `&'static [u8]`); re-erase the borrow lifetime
-                        // to `'static` to match `EString.data: &'static [u8]`.
-                        s.data = bun_ast::StoreStr::new(unsafe {
-                            core::slice::from_raw_parts(basename.as_ptr(), basename.len())
-                        });
+                        // `destination` is interned in the process-global DirnameStore.
+                        s.data = bun_ast::StoreStr::new(bun_paths::basename(destination));
                     }
                 }
 
@@ -967,19 +914,11 @@ impl CreateCommand {
                         }
 
                         let value = props.slice()[i].value.unwrap();
-                        // `as_property` returns an owned `Query`
-                        // (Copy types backed by an arena `StoreRef`). Borrowck
-                        // ties any `&[u8]` we pull out of it to the `if let`
-                        // scope even though the underlying `EString.data` is
-                        // `&'static [u8]`. Erase the local borrow lifetime via
-                        // raw-pointer round-trip so the task slices can outlive
-                        // the temporary `Query`.
-                        let arena_str = |s: &[u8]| -> &'static [u8] {
-                            // SAFETY: `s` always points into the JSON arena
-                            // (initialized via `initialize_store()`), which
-                            // lives for the rest of `exec`.
-                            unsafe { &*std::ptr::from_ref::<[u8]>(s) }
-                        };
+                        // `as_property` returns an owned `Query` (Copy types
+                        // backed by an arena `StoreRef`), so borrowck ties any
+                        // `&[u8]` pulled out of it to the `if let` scope; copy the
+                        // few task strings into the CLI arena.
+                        let arena_str = |s: &[u8]| -> &'static [u8] { crate::cli::cli_dupe(s) };
                         if let Some(postinstall) = value.as_property(b"postinstall") {
                             match postinstall.expr.data {
                                 LExprData::EString(single_task) => {
@@ -1255,9 +1194,8 @@ impl CreateCommand {
         Output::flush();
 
         if create_options.open {
-            // SAFETY: single-threaded CLI access to module-level static path buffer
-            let bun_path_buf = unsafe { &mut *BUN_PATH_BUF.get() };
-            if let Some(bin) = which(bun_path_buf, path_env, destination, b"bun") {
+            let mut bun_path_buf = PathBuffer::uninit();
+            if let Some(bin) = which(&mut bun_path_buf, path_env, destination, b"bun") {
                 let argv: [&[u8]; 1] = [bin.as_bytes()];
                 crate::cli::open::open_url(bun_core::zstr!("http://localhost:3000/"));
 
@@ -1285,10 +1223,10 @@ impl CreateCommand {
         Ok(())
     }
 
-    pub(crate) fn extract_info(ctx: &Command::Context<'_>) -> crate::Result<ExtractedInfo> {
+    pub(crate) fn extract_info(ctx: &mut Command::ContextData) -> crate::Result<ExtractedInfo> {
         let example_tag;
-        // SAFETY: process-lifetime singleton; init returns *mut.
-        let filesystem = unsafe { &*fs::FileSystem::init(None)? };
+        fs::FileSystem::init(None)?;
+        let filesystem = fs::FileSystem::get();
 
         let create_options = CreateOptions::parse(ctx)?;
         let positionals = &create_options.positionals;
@@ -1302,8 +1240,8 @@ impl CreateCommand {
         env_loader.load_process()?;
 
         // var unsupported_packages = UnsupportedPackages{};
-        // SAFETY: single-threaded CLI access to module-level static path buffer
-        let home_dir_buf = unsafe { &mut *HOME_DIR_BUF.get() };
+        let mut home_dir_buf = PathBuffer::uninit();
+        let home_dir_buf = &mut *home_dir_buf;
         let template: &[u8] = 'brk: {
             let positional = positionals[0];
 
@@ -1354,7 +1292,7 @@ impl CreateCommand {
                             .unwrap_or(false)
                         {
                             example_tag = ExampleTag::LocalFolder;
-                            break 'brk &home_dir_buf[..len];
+                            break 'brk crate::cli::cli_dupe(&home_dir_buf[..len]);
                         }
                     }
                 }
@@ -1373,7 +1311,7 @@ impl CreateCommand {
                         .unwrap_or(false)
                     {
                         example_tag = ExampleTag::LocalFolder;
-                        break 'brk &home_dir_buf[..len];
+                        break 'brk crate::cli::cli_dupe(&home_dir_buf[..len]);
                     }
                 }
 
@@ -1392,7 +1330,7 @@ impl CreateCommand {
                             .unwrap_or(false)
                         {
                             example_tag = ExampleTag::LocalFolder;
-                            break 'brk &home_dir_buf[..len];
+                            break 'brk crate::cli::cli_dupe(&home_dir_buf[..len]);
                         }
                     }
                 }
@@ -1475,7 +1413,6 @@ pub(crate) struct ExtractedInfo {
 fn file_copier_copy(
     destination_dir_: &bun_sys::Dir,
     walker: &mut bun_sys::walker_skippable::Walker,
-    node_: &mut ProgressNode,
     progress_: &mut Progress,
     #[cfg(windows)] dst_base_len: usize,
     #[cfg(windows)] dst_buf: &mut bun_paths::WPathBuffer,
@@ -1501,37 +1438,17 @@ fn file_copier_copy(
 
             match entry.kind {
                 bun_sys::FileKind::Directory => {
-                    // SAFETY: `src`/`dst` are NUL-terminated wide strings built into
-                    // `src_buf`/`dst_buf` above; raw Win32 FFI.
-                    if unsafe {
-                        bun_sys::windows::CreateDirectoryExW(
-                            src.as_ptr(),
-                            dst.as_ptr(),
-                            core::ptr::null_mut(),
-                        )
-                    } == 0
-                    {
+                    if !bun_sys::windows::create_directory_ex_w(src, dst) {
                         let _ = bun_sys::MakePath::make_path_u16(destination_dir_, entry.path);
                     }
                 }
                 bun_sys::FileKind::File => {
-                    // Capture `node_` as a raw pointer so the defer closure
-                    // doesn't hold a unique borrow across the error-path `node_.end()` below.
-                    let node_ptr: *mut ProgressNode = node_;
-                    // SAFETY: `node_` outlives this match arm; single-threaded progress access.
-                    scopeguard::defer! { unsafe { (*node_ptr).complete_one() } }
-                    // SAFETY: `src`/`dst` are NUL-terminated wide strings built into
-                    // `src_buf`/`dst_buf` above; raw Win32 FFI.
-                    if unsafe { bun_sys::windows::CopyFileW(src.as_ptr(), dst.as_ptr(), 0) }
-                        == bun_sys::windows::FALSE
-                    {
+                    if !bun_sys::windows::copy_file_w(src, dst, false) {
                         if let Some(entry_dirname) = bun_paths::Dirname::dirname_u16(entry.path) {
                             let _ =
                                 bun_sys::MakePath::make_path_u16(destination_dir_, entry_dirname);
-                            // SAFETY: same NUL-terminated wide strings as above; retry after mkdir.
-                            if unsafe { bun_sys::windows::CopyFileW(src.as_ptr(), dst.as_ptr(), 0) }
-                                != bun_sys::windows::FALSE
-                            {
+                            if bun_sys::windows::copy_file_w(src, dst, false) {
+                                progress_.root.complete_one();
                                 continue;
                             }
                         }
@@ -1555,10 +1472,11 @@ fn file_copier_copy(
                                 ),
                             );
                         }
-                        node_.end();
+                        progress_.root.end();
                         progress_.refresh();
                         Global::crash();
                     }
+                    progress_.root.complete_one();
                 }
                 _ => unreachable!(),
             }
@@ -1591,7 +1509,7 @@ fn file_copier_copy(
                     ) {
                         Ok(f) => break 'brk f,
                         Err(err) => {
-                            node_.end();
+                            progress_.root.end();
                             progress_.refresh();
                             Output::err(
                                 err,
@@ -1610,11 +1528,6 @@ fn file_copier_copy(
                 }
             };
             let _close_out = bun_sys::CloseOnDrop::new(outfile);
-            // Capture `node_` as a raw pointer so the defer body
-            // doesn't hold a unique borrow across the error-path `node_.end()` below.
-            let node_ptr: *mut ProgressNode = node_;
-            // SAFETY: `node_` outlives this loop body; single-threaded progress access.
-            scopeguard::defer! { unsafe { (*node_ptr).complete_one() } }
 
             let infile = bun_sys::openat(entry.dir, entry.basename, bun_sys::O::RDONLY, 0)?;
             let _close_in = bun_sys::CloseOnDrop::new(infile);
@@ -1628,7 +1541,7 @@ fn file_copier_copy(
             }
 
             if let Err(err) = CopyFile::copy_file(infile, outfile) {
-                node_.end();
+                progress_.root.end();
                 progress_.refresh();
                 Output::err(
                     err,
@@ -1640,13 +1553,14 @@ fn file_copier_copy(
                 );
                 Global::crash();
             }
+            drop(_close_in);
+            progress_.root.complete_one();
         }
     }
     Ok(())
 }
 
 struct Analyzer<'a> {
-    ctx: &'a Command::Context<'a>,
     example_tag: ExampleTag,
     entry_point: &'a [u8],
     node: &'a mut ProgressNode,
@@ -1660,19 +1574,18 @@ impl bun_bundler::bundle_v2::OnDependenciesAnalyze for Analyzer<'_> {
         let this = self;
         this.node.end();
 
-        SourceFileProjectGenerator::generate(this.ctx, this.example_tag, this.entry_point, result)
+        SourceFileProjectGenerator::generate(this.example_tag, this.entry_point, result)
             .map_err(Into::into)
     }
 }
 
 fn run_on_entry_point(
-    ctx: &Command::Context,
+    ctx: &mut Command::ContextData,
     example_tag: ExampleTag,
     entry_point: &[u8],
     node: &mut ProgressNode,
 ) -> crate::Result<()> {
     let mut analyzer = Analyzer {
-        ctx,
         example_tag,
         entry_point,
         node,
@@ -1682,7 +1595,7 @@ fn run_on_entry_point(
         &mut analyzer,
         vec![Box::<[u8]>::from(entry_point)].into_boxed_slice(),
     );
-    crate::cli::build_command::BuildCommand::exec(crate::cli::Command::get(), Some(&fetcher))
+    crate::cli::build_command::BuildCommand::exec(ctx, Some(&fetcher))
 }
 
 pub struct Example {
@@ -1724,25 +1637,12 @@ impl ExampleTag {
     }
 }
 
-// PORTING.md §Global mutable state: single-threaded CLI scratch state →
-// RacyCell. `URL_` borrows into the `*_BUF` statics so they must remain
-// process-lifetime, not stack locals.
-static URL_: bun_core::RacyCell<Option<URL<'static>>> = bun_core::RacyCell::new(None);
-static APP_NAME_BUF: bun_core::RacyCell<[u8; 512]> = bun_core::RacyCell::new([0u8; 512]);
-static GITHUB_REPOSITORY_URL_BUF: bun_core::RacyCell<[u8; 1024]> =
-    bun_core::RacyCell::new([0u8; 1024]);
-// Static so the borrowed slice satisfies `URL<'static>` for
-// `AsyncHTTP::init_sync` (single-threaded CLI; same pattern as
-// `GITHUB_REPOSITORY_URL_BUF`).
-static NPM_REGISTRY_URL_BUF: bun_core::RacyCell<[u8; 1024]> = bun_core::RacyCell::new([0u8; 1024]);
-
 impl Example {
     const EXAMPLES_URL: &'static [u8] = b"https://registry.npmjs.org/bun-examples-all/latest";
 
     pub(crate) fn print(examples: &[Example], default_app_name: Option<&[u8]>) {
         for example in examples {
-            // SAFETY: single-threaded CLI access to static buffer
-            let app_name_buf = unsafe { &mut *APP_NAME_BUF.get() };
+            let mut app_name_buf = [0u8; 512];
             let app_name: &[u8] = default_app_name.unwrap_or_else(|| {
                 let mut cursor: &mut [u8] = &mut app_name_buf[..];
                 let cap = cursor.len();
@@ -1774,10 +1674,10 @@ impl Example {
     }
 
     pub(crate) fn fetch_all_local_and_remote(
-        ctx: &Command::Context,
+        ctx: &mut Command::ContextData,
         mut node: Option<&mut ProgressNode>,
         env_loader: &mut DotEnv::Loader,
-        filesystem: &mut fs::FileSystem,
+        filesystem: &fs::FileSystem,
     ) -> crate::Result<Vec<Example>> {
         let remote_examples = Example::fetch_all(ctx, env_loader, node.as_deref_mut())?;
         if let Some(node_) = node {
@@ -1786,8 +1686,8 @@ impl Example {
 
         let mut examples: Vec<Example> = remote_examples.into_vec();
         {
-            // SAFETY: single-threaded CLI access to module-level static path buffer
-            let home_dir_buf = unsafe { &mut *HOME_DIR_BUF.get() };
+            let mut home_dir_buf = PathBuffer::uninit();
+            let home_dir_buf = &mut *home_dir_buf;
             let mut folders: [bun_sys::Dir; 3] = [
                 bun_sys::Dir::from_fd(bun_sys::Fd::invalid()),
                 bun_sys::Dir::from_fd(bun_sys::Fd::invalid()),
@@ -1836,13 +1736,10 @@ impl Example {
                                     .copy_from_slice(b"package.json");
                                 home_dir_buf[entry_name.len() + 1 + b"package.json".len()] = 0;
 
-                                // SAFETY: NUL written at [entry_name.len() + 1 + "package.json".len()]
-                                let path = unsafe {
-                                    bun_core::ZStr::from_raw_mut(
-                                        home_dir_buf.as_mut_ptr(),
-                                        entry_name.len() + 1 + b"package.json".len(),
-                                    )
-                                };
+                                let path = bun_core::ZStr::from_buf(
+                                    &home_dir_buf[..],
+                                    entry_name.len() + 1 + b"package.json".len(),
+                                );
 
                                 if !bun_sys::faccessat(folder, path).unwrap_or(false) {
                                     continue 'loop_;
@@ -1865,11 +1762,10 @@ impl Example {
     }
 
     pub(crate) fn fetch_from_github(
-        _ctx: &Command::Context,
+        _ctx: &mut Command::ContextData,
         env_loader: &mut DotEnv::Loader,
         name: &[u8],
-        refresher: &mut Progress,
-        progress: &mut ProgressNode,
+        progress: &mut Progress,
     ) -> crate::Result<MutableString> {
         let owner_i = bun_core::strings::index_of_char_usize(name, b'/').unwrap() as usize;
         let owner = &name[0..owner_i];
@@ -1879,12 +1775,12 @@ impl Example {
             repository = &repository[0..i as usize];
         }
 
-        progress.name = ProgressBuf::pretty(format_args!(
+        progress.root.name = ProgressBuf::pretty(format_args!(
             "<d>[github] <b>GET<r> <blue>{}/{}<r>",
             bstr::BStr::new(owner),
             bstr::BStr::new(repository),
         ))?;
-        refresher.refresh();
+        progress.refresh();
 
         let mut github_api_domain: &[u8] = b"api.github.com";
         if let Some(api_domain) = env_loader.map.get(b"GITHUB_API_DOMAIN") {
@@ -1893,8 +1789,7 @@ impl Example {
             }
         }
 
-        // SAFETY: single-threaded CLI access to static buffer
-        let url_buf = unsafe { &mut *GITHUB_REPOSITORY_URL_BUF.get() };
+        let mut url_buf = [0u8; 1024];
         let api_url = URL::parse({
             let mut cursor: &mut [u8] = &mut url_buf[..];
             let cap = cursor.len();
@@ -1953,7 +1848,7 @@ impl Example {
             http_proxy,
             HTTP::FetchRedirect::Follow,
         ));
-        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut *progress));
+        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut progress.root));
         async_http.client.flags.reject_unauthorized = env_loader.get_tls_reject_unauthorized();
 
         let response = async_http.send_sync(mutable)?;
@@ -1971,8 +1866,8 @@ impl Example {
         let is_expected_content_type = content_type == b"application/x-gzip";
 
         if !is_expected_content_type {
-            progress.end();
-            refresher.refresh();
+            progress.root.end();
+            progress.refresh();
 
             if !content_type.is_empty() {
                 bun_core::pretty_errorln!(
@@ -1989,8 +1884,8 @@ impl Example {
         }
 
         if mutable.list.is_empty() {
-            progress.end();
-            refresher.refresh();
+            progress.root.end();
+            progress.refresh();
 
             bun_core::pretty_errorln!(
                 "<r><red>error<r>: Invalid response from GitHub (missing body)"
@@ -2002,17 +1897,15 @@ impl Example {
     }
 
     pub(crate) fn fetch(
-        ctx: &Command::Context,
+        ctx: &mut Command::ContextData,
         env_loader: &mut DotEnv::Loader,
         name: &[u8],
-        refresher: &mut Progress,
-        progress: &mut ProgressNode,
+        progress: &mut Progress,
     ) -> crate::Result<MutableString> {
-        progress.name = b"Fetching package.json";
-        refresher.refresh();
+        progress.root.name = b"Fetching package.json";
+        progress.refresh();
 
-        // SAFETY: single-threaded CLI access to static buffer.
-        let url_buf = unsafe { &mut *NPM_REGISTRY_URL_BUF.get() };
+        let mut url_buf = [0u8; 1024];
         let mutable: &'static mut MutableString =
             crate::cli::cli_arena().alloc(MutableString::init(2048)?);
 
@@ -2027,35 +1920,19 @@ impl Example {
             let written = cap - cursor.len();
             &url_buf[..written]
         });
-        // SAFETY: `api_url` borrows from the process-global `NPM_REGISTRY_URL_BUF`;
-        // erase the local reborrow lifetime for storage in `URL_` /
-        // `AsyncHTTP::init_sync` (single-threaded CLI; same as
-        // `fetch_from_github`).
-        unsafe {
-            *URL_.get() = Some(api_url.erase_lifetime());
-        }
-
-        // SAFETY: `http_proxy` borrows from `env_loader`, which outlives this
-        // fn. Erased to `'static` because `async_http` is `cli_arena()`-backed
-        // (so its type parameter is `'static`), but the proxy URL is only read
-        // during the `send_sync()` calls below while `env_loader` is live.
-        let mut http_proxy: Option<URL<'static>> = env_loader
-            .get_http_proxy_for(unsafe { (*URL_.get()).as_ref().unwrap() })
-            .map(|u| unsafe { u.erase_lifetime() });
+        let mut http_proxy = env_loader.get_http_proxy_for(&api_url);
 
         // ensure very stable memory address
-        let async_http: &mut HTTP::AsyncHTTP =
-            crate::cli::cli_arena().alloc(HTTP::AsyncHTTP::init_sync(
-                HTTP::Method::GET,
-                // SAFETY: single-threaded CLI access to static URL_ (set just above)
-                unsafe { (*URL_.get()).clone() }.unwrap(),
-                Default::default(),
-                b"",
-                b"",
-                http_proxy,
-                HTTP::FetchRedirect::Follow,
-            ));
-        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut *progress));
+        let mut async_http = Box::new(HTTP::AsyncHTTP::init_sync(
+            HTTP::Method::GET,
+            api_url,
+            Default::default(),
+            b"",
+            b"",
+            http_proxy,
+            HTTP::FetchRedirect::Follow,
+        ));
+        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut progress.root));
         async_http.client.flags.reject_unauthorized = env_loader.get_tls_reject_unauthorized();
 
         let mut response = async_http.send_sync(mutable)?;
@@ -2069,19 +1946,17 @@ impl Example {
             _ => return Err(crate::Error::HTTPError),
         }
 
-        progress.name = b"Parsing package.json";
-        refresher.refresh();
+        progress.root.name = b"Parsing package.json";
+        progress.refresh();
         bun_ast::initialize_store();
         let source = bun_ast::Source::init_path_string(b"package.json", mutable.list.as_slice());
-        // SAFETY: single-threaded CLI dispatch; no other borrow of the
-        // process-static `Cli::LOG_` is live across this scope.
-        let log = unsafe { ctx.log_mut() };
+        let log = ctx.log_mut();
         let bump: &'static bun_alloc::Arena = crate::cli::cli_arena();
         let expr = match JSON::parse_utf8(&source, log, bump) {
             Ok(e) => e,
             Err(err) => {
-                progress.end();
-                refresher.refresh();
+                progress.root.end();
+                progress.refresh();
 
                 if log.errors > 0 {
                     let _ = log.print(std::ptr::from_mut(Output::error_writer()));
@@ -2094,8 +1969,8 @@ impl Example {
         };
 
         if log.errors > 0 {
-            progress.end();
-            refresher.refresh();
+            progress.root.end();
+            progress.refresh();
 
             let _ = log.print(std::ptr::from_mut(Output::error_writer()));
             Global::exit(1);
@@ -2114,8 +1989,8 @@ impl Example {
                 }
             }
 
-            progress.end();
-            refresher.refresh();
+            progress.root.end();
+            progress.refresh();
 
             bun_core::pretty_errorln!(
                 "package.json is missing tarball url. This is an internal error!",
@@ -2123,8 +1998,8 @@ impl Example {
             Global::exit(1);
         };
 
-        progress.name = b"Downloading tarball";
-        refresher.refresh();
+        progress.root.name = b"Downloading tarball";
+        progress.refresh();
 
         // reuse mutable buffer
         // safe because the only thing we care about is the tarball url
@@ -2133,10 +2008,7 @@ impl Example {
         // ensure very stable memory address
         let parsed_tarball_url = URL::parse(tarball_url);
 
-        // SAFETY: see note on `http_proxy` above.
-        http_proxy = env_loader
-            .get_http_proxy_for(&parsed_tarball_url)
-            .map(|u| unsafe { u.erase_lifetime() });
+        http_proxy = env_loader.get_http_proxy_for(&parsed_tarball_url);
 
         *async_http = HTTP::AsyncHTTP::init_sync(
             HTTP::Method::GET,
@@ -2147,18 +2019,18 @@ impl Example {
             http_proxy,
             HTTP::FetchRedirect::Follow,
         );
-        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut *progress));
+        async_http.client.progress_node = Some(core::ptr::NonNull::from(&mut progress.root));
         async_http.client.flags.reject_unauthorized = env_loader.get_tls_reject_unauthorized();
 
-        refresher.maybe_refresh();
+        progress.maybe_refresh();
 
         response = async_http.send_sync(mutable)?;
 
-        refresher.maybe_refresh();
+        progress.maybe_refresh();
 
         if response.status_code() != 200 {
-            progress.end();
-            refresher.refresh();
+            progress.root.end();
+            progress.refresh();
             bun_core::pretty_errorln!(
                 "Error fetching tarball: <r><red>{}<r>",
                 response.status_code(),
@@ -2166,13 +2038,13 @@ impl Example {
             Global::exit(1);
         }
 
-        refresher.refresh();
+        progress.refresh();
 
         Ok(mutable.clone()?)
     }
 
     pub(crate) fn fetch_all(
-        ctx: &Command::Context,
+        ctx: &mut Command::ContextData,
         env_loader: &mut DotEnv::Loader,
         progress_node: Option<&mut ProgressNode>,
     ) -> crate::Result<Box<[Example]>> {
@@ -2229,9 +2101,7 @@ impl Example {
         // Use the process-lifetime CLI arena (examples slices borrow from it
         // and the CLI exits shortly after).
         let bump: &'static bun_alloc::Arena = crate::cli::cli_arena();
-        // SAFETY: single-threaded CLI dispatch; no other borrow of the
-        // process-static `Cli::LOG_` is live across this scope.
-        let log = unsafe { ctx.log_mut() };
+        let log = ctx.log_mut();
         let examples_object = match JSON::parse_utf8(&source, log, bump) {
             Ok(e) => e,
             Err(err) => {
@@ -2313,8 +2183,9 @@ impl Example {
 struct CreateListExamplesCommand;
 
 impl CreateListExamplesCommand {
-    fn exec(ctx: &Command::Context) -> crate::Result<()> {
-        let filesystem = fs::FileSystem::init(None)?;
+    fn exec(ctx: &mut Command::ContextData) -> crate::Result<()> {
+        fs::FileSystem::init(None)?;
+        let filesystem = fs::FileSystem::get();
         let mut env_loader = DotEnv::Loader::init();
 
         env_loader.load_process()?;
@@ -2323,17 +2194,13 @@ impl CreateListExamplesCommand {
             supports_ansi_escape_codes: Output::enable_ansi_colors_stderr(),
             ..Default::default()
         };
-        // `Progress::start` returns `&mut Node` borrowing `progress`; detach
-        // via raw pointer so `progress.refresh()` can re-borrow below.
-        let node: *mut ProgressNode = progress.start(b"Fetching manifest", 0);
+        // `Progress::start` returns `&mut progress.root`.
+        progress.start(b"Fetching manifest", 0);
         progress.refresh();
 
-        // SAFETY: FileSystem::init returns the process-global singleton; valid for 'static.
-        let filesystem = unsafe { &mut *filesystem };
-        // SAFETY: `node` points into `progress`, which outlives this call; single-threaded.
         let examples = Example::fetch_all_local_and_remote(
             ctx,
-            Some(unsafe { &mut *node }),
+            Some(&mut progress.root),
             &mut env_loader,
             filesystem,
         )?;
@@ -2369,10 +2236,9 @@ struct GitHandler;
 static SUCCESS: AtomicU32 = AtomicU32::new(0);
 // bun_threading has no top-level Thread wrapper yet,
 // so use std::thread::JoinHandle directly (CLI-only, no JSC interaction).
-// PORTING.md §Global mutable state: written in `spawn`, taken in `wait`, both
-// on the main CLI thread → RacyCell.
-static THREAD: bun_core::RacyCell<Option<std::thread::JoinHandle<()>>> =
-    bun_core::RacyCell::new(None);
+// Written in `spawn`, taken in `wait`, both on the main CLI thread.
+static THREAD: bun_threading::Guarded<Option<std::thread::JoinHandle<()>>> =
+    bun_threading::Guarded::new(None);
 
 impl GitHandler {
     fn spawn(destination: &[u8], path: &[u8], verbose: bool) {
@@ -2391,8 +2257,7 @@ impl GitHandler {
                 Global::exit(1);
             }
         };
-        // SAFETY: single-threaded CLI; written once before wait()
-        unsafe { *THREAD.get() = Some(thread) };
+        *THREAD.lock() = Some(thread);
     }
 
     fn spawn_thread(destination: &[u8], path: &[u8], verbose: bool) {
@@ -2414,8 +2279,7 @@ impl GitHandler {
         }
 
         let outcome = SUCCESS.load(Ordering::Acquire) == 1;
-        // SAFETY: THREAD set in spawn() on this same thread before wait() called
-        let _ = unsafe { (*THREAD.get()).take() }.unwrap().join();
+        let _ = THREAD.lock().take().unwrap().join();
         outcome
     }
 
@@ -2441,10 +2305,7 @@ impl GitHandler {
         //   Time (mean ± σ):     306.7 ms ±   6.1 ms    [User: 31.7 ms, System: 269.8 ms]
         //   Range (min … max):   299.5 ms … 318.8 ms    10 runs
 
-        // SAFETY: single-threaded CLI access to module-level static path buffer (note: this fn
-        // may run on the git thread; BUN_PATH_BUF is also touched on main thread for `--open`.
-        // The two uses are sequenced — git runs before `--open` block.)
-        let bun_path_buf = unsafe { &mut *BUN_PATH_BUF.get() };
+        let mut bun_path_buf = PathBuffer::uninit();
         // `bun.spawnSync` on Windows drives `uv_spawn` and needs a uv loop. This fn
         // runs on the dedicated git thread (see `GitHandler::spawn`), so use the
         // *thread-local* `MiniEventLoop` singleton — `init_global` is `thread_local!`-backed,
@@ -2453,7 +2314,7 @@ impl GitHandler {
         let win_loop = bun_event_loop::EventLoopHandle::init_mini(
             bun_event_loop::MiniEventLoop::init_global(None, None),
         );
-        if let Some(git) = which(bun_path_buf, path, destination, b"git") {
+        if let Some(git) = which(&mut bun_path_buf, path, destination, b"git") {
             let git: &[u8] = git.as_bytes();
             let git_commands: [&[&[u8]]; 3] = [
                 &[git, b"init", b"--quiet"],
