@@ -231,7 +231,6 @@ impl Expansion {
                         *off += prepended;
                     }
                 }
-                home.deref();
             }
             // Brace expansion
             // first, then glob, else flush as a single word.
@@ -454,7 +453,6 @@ impl Expansion {
         has_quoted_empty: &mut bool,
         expand_tilde: bool,
     ) -> bool {
-        use crate::shell::env_str::EnvStr;
         match atom {
             ast::SimpleAtom::Text(txt) => out.extend_from_slice(txt),
             ast::SimpleAtom::QuotedEmpty => {
@@ -466,13 +464,13 @@ impl Expansion {
             }
             ast::SimpleAtom::Var(label) => {
                 // Spec `expandVar`: shell_env first, then export_env, else "".
-                let key = EnvStr::init_slice(label);
-                if let Some(v) = shell.shell_env.get(key) {
+                let label: &[u8] = label;
+                if let Some(v) = shell
+                    .shell_env
+                    .get(label)
+                    .or_else(|| shell.export_env.get(label))
+                {
                     out.extend_from_slice(v.slice());
-                    v.deref();
-                } else if let Some(v) = shell.export_env.get(EnvStr::init_slice(label)) {
-                    out.extend_from_slice(v.slice());
-                    v.deref();
                 }
             }
             ast::SimpleAtom::VarArgv(int) => interp.append_var_argv(out, *int),
@@ -503,7 +501,6 @@ impl Expansion {
                 if expand_tilde {
                     let home = shell.get_homedir();
                     out.extend_from_slice(home.slice());
-                    home.deref();
                 } else {
                     out.push(b'~');
                 }
