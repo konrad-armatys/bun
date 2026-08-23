@@ -102,10 +102,10 @@ enum BunSocket {
     // between `attach_to_native_socket` and `detach_native_socket`. `BackRef`
     // makes the shared-only deref safe at every read site (all `NewSocket`
     // methods used here take `&self`).
-    Tls(bun_ptr::BackRef<TLSSocket, bun_ptr::Mut>),
-    TlsWriteonly(bun_ptr::BackRef<TLSSocket, bun_ptr::Mut>),
-    Tcp(bun_ptr::BackRef<TCPSocket, bun_ptr::Mut>),
-    TcpWriteonly(bun_ptr::BackRef<TCPSocket, bun_ptr::Mut>),
+    Tls(bun_ptr::BackRef<TLSSocket, bun_ptr::Root>),
+    TlsWriteonly(bun_ptr::BackRef<TLSSocket, bun_ptr::Root>),
+    Tcp(bun_ptr::BackRef<TCPSocket, bun_ptr::Root>),
+    TcpWriteonly(bun_ptr::BackRef<TCPSocket, bun_ptr::Root>),
 }
 
 /// The ref a `BunSocket::*Writeonly` attachment holds on its socket.
@@ -7458,8 +7458,8 @@ impl H2FrameParser {
     fn attach_to_native_socket<const SSL: bool>(
         &self,
         socket: bun_ptr::ThisPtr<crate::socket::NewSocket<SSL>>,
-        attached: fn(bun_ptr::BackRef<crate::socket::NewSocket<SSL>, bun_ptr::Mut>) -> BunSocket,
-        writeonly: fn(bun_ptr::BackRef<crate::socket::NewSocket<SSL>, bun_ptr::Mut>) -> BunSocket,
+        attached: fn(bun_ptr::BackRef<crate::socket::NewSocket<SSL>, bun_ptr::Root>) -> BunSocket,
+        writeonly: fn(bun_ptr::BackRef<crate::socket::NewSocket<SSL>, bun_ptr::Root>) -> BunSocket,
         writeonly_ref: fn(bun_ptr::RefPtr<crate::socket::NewSocket<SSL>>) -> WriteonlySocketRef,
     ) -> BunSocket {
         let h2 = self.ref_guard();

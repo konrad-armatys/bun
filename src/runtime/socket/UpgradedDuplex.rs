@@ -17,7 +17,7 @@ use core::ffi::{CStr, c_uint};
 
 use bun_jsc::virtual_machine::VirtualMachine;
 use bun_jsc::{CallFrame, GlobalRef, JSGlobalObject, JSValue, JsCell, JsResult, host_fn};
-use bun_ptr::{BackRef, Mut};
+use bun_ptr::{BackRef, Root};
 use bun_uws::{us_bun_verify_error_t, uws_callback};
 
 use super::DuplexUpgradeContext;
@@ -41,7 +41,7 @@ pub(crate) struct UpgradedDuplex {
     pub vm: Option<&'static VirtualMachine>,
     /// The container holding self as `.upgrade`, set right after it is
     /// allocated; events go to its `on_*` entry points.
-    pub owner: Cell<Option<BackRef<DuplexUpgradeContext, Mut>>>,
+    pub owner: Cell<Option<BackRef<DuplexUpgradeContext, Root>>>,
     /// The `origin` listener thunks handed to JS; their context is `self`, and
     /// dropping the handle (in `teardown`) neuters them.
     on_data_callback: JsCell<Option<host_fn::ContextFunction>>,
