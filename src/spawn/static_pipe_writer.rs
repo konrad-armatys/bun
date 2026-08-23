@@ -45,7 +45,7 @@ pub struct StaticPipeWriter<P: StaticPipeWriterProcess> {
     pub source: Source,
     /// The owning process, notified on close. It holds this writer in its
     /// stdin slot and closes it (firing `on_close`) before it is itself freed.
-    pub(crate) process: bun_ptr::BackRef<P, bun_ptr::Mut>,
+    pub(crate) process: bun_ptr::BackRef<P, bun_ptr::Root>,
     pub(crate) event_loop: EventLoopHandle,
     /// `start()`'s ref while the write is in flight (see the type docs).
     start_ref: Option<RefPtr<Self>>,

@@ -130,7 +130,7 @@ pub struct Subprocess<'a> {
 
     /// Terminal attached to this subprocess (if spawned with terminal
     /// option). Kept alive by its JS wrapper, which is cached on ours.
-    pub(crate) terminal: Cell<Option<BackRef<Terminal, bun_ptr::Mut>>>,
+    pub(crate) terminal: Cell<Option<BackRef<Terminal, bun_ptr::Root>>>,
 
     // The JSC global outlives every Subprocess.
     pub global_this: bun_ptr::BackRef<JSGlobalObject>,
@@ -144,7 +144,7 @@ pub struct Subprocess<'a> {
 
     /// Weak observer of the stdin `FileSink` — holds no ref. `on_stdin_destroyed`
     /// nulls this before the sink is freed, so it is never dereferenced after the sink dies.
-    pub(crate) weak_file_sink_stdin_ptr: Cell<Option<BackRef<FileSink, bun_ptr::Mut>>>,
+    pub(crate) weak_file_sink_stdin_ptr: Cell<Option<BackRef<FileSink, bun_ptr::Root>>>,
     /// The ref held while a stdin `FileSink` points back at us; its JS
     /// destructor or close signal reaches `on_stdin_destroyed`, which releases
     /// it.
@@ -537,7 +537,7 @@ impl Subprocess<'_> {
     #[bun_jsc::host_fn(getter)]
     pub(crate) fn get_terminal(this: &Self, global_this: &JSGlobalObject) -> JSValue {
         if let Some(terminal) = this.terminal.get() {
-            return crate::api::bun_terminal_body::to_js(terminal.as_ptr(), global_this);
+            return crate::api::bun_terminal_body::to_js(terminal.this_ptr().as_ptr(), global_this);
         }
         JSValue::UNDEFINED
     }

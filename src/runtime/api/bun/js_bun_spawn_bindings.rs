@@ -366,7 +366,7 @@ fn spawn_maybe_sync(
     let mut windows_verbatim_arguments: bool = false;
     let mut abort_signal: Option<jsc::AbortSignalRef> = None;
     let mut terminal_info: Option<terminal_body::CreateResult> = None;
-    let mut existing_terminal: Option<bun_ptr::BackRef<Terminal, bun_ptr::Mut>> = None; // Existing terminal passed by user
+    let mut existing_terminal: Option<bun_ptr::BackRef<Terminal, bun_ptr::Root>> = None; // Existing terminal passed by user
     let mut terminal_js_value: JSValue = JSValue::ZERO;
     let mut defer_guard = scopeguard::guard(
         (&mut abort_signal, &mut terminal_info),
@@ -770,15 +770,10 @@ fn spawn_maybe_sync(
             if !is_sync {
                 if let Some(terminal_val) = args.get_truthy(global_this, "terminal")? {
                     // Check if it's an existing Terminal object
-                    if let Some(terminal) = terminal_body::js::from_js(terminal_val) {
-                        // `from_js` returns the live `m_ctx` pointer borrowed
-                        // from the JS wrapper; it stays valid for as long as
-                        // `terminal_val` is reachable (kept alive below via
-                        // `terminal_js_value`), so the `BackRef` invariant
-                        // (pointee outlives holder) holds for this scope.
-                        // SAFETY: `terminal` is the wrapper's live `m_ctx` heap pointer
-                        // (write provenance from its original allocation).
-                        let term = unsafe { bun_ptr::BackRef::from_raw_mut(terminal.as_ptr()) };
+                    if let Some(terminal) = terminal_val.as_class_this_ptr::<Terminal>() {
+                        // Kept alive for this scope (and beyond, via
+                        // `terminal_js_value`) by the JS wrapper.
+                        let term = bun_ptr::BackRef::from(terminal);
                         if term.is_closed() {
                             return Err(global_this
                                 .throw_invalid_arguments(format_args!("terminal is closed")));

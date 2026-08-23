@@ -1143,7 +1143,7 @@ pub struct PipeReader {
     pub(crate) reader: JsCell<IOReader>,
     /// Cleared by `detach` (from the subprocess's own teardown) before the
     /// subprocess is freed.
-    pub(crate) process: Cell<Option<BackRef<ShellSubprocess, bun_ptr::Mut>>>,
+    pub(crate) process: Cell<Option<BackRef<ShellSubprocess, bun_ptr::Root>>>,
     pub(crate) event_loop: Cell<EventLoopHandle>,
     pub(crate) state: JsCell<PipeReaderState>,
     #[cfg_attr(windows, allow(dead_code))]

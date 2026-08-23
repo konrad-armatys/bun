@@ -870,7 +870,7 @@ pub enum SourceHandle {
     /// The `'static` bound erases the `&JSGlobalObject` borrow carried in
     /// `Subprocess<'a>`; the pointed-at allocation outlives this handle.
     Subprocess(BackRef<crate::api::bun::subprocess::Subprocess<'static>>),
-    ShellSubprocess(BackRef<crate::shell::subproc::ShellSubprocess, bun_ptr::Mut>),
+    ShellSubprocess(BackRef<crate::shell::subproc::ShellSubprocess, bun_ptr::Root>),
     FetchResponseBody(BackRef<crate::webcore::fetch::fetch_tasklet::FetchTasklet, bun_ptr::Mut>),
     ServerRequestBody(crate::server::AnyRequestContext),
     S3DownloadBody(BackRef<crate::webcore::s3::client::S3DownloadStreamWrapper>),

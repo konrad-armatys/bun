@@ -307,7 +307,7 @@ impl Options {
 pub(crate) struct CreateResult {
     /// The new terminal; its initial ref belongs to the JS wrapper (`js_value`),
     /// which holds itself strong until the terminal closes.
-    pub terminal: bun_ptr::BackRef<Terminal, bun_ptr::Mut>,
+    pub terminal: bun_ptr::BackRef<Terminal, bun_ptr::Root>,
     pub js_value: JSValue,
 }
 
