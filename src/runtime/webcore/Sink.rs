@@ -756,9 +756,10 @@ pub(crate) unsafe fn sink_handle_from_id(
         HTTPS_RESPONSE_SINK => SinkHandle::HttpsResponse(unsafe {
             bun_ptr::BackRef::from_raw_mut(raw.cast::<streams::HTTPSResponseSink>())
         }),
-        // SAFETY: caller contract — `raw` is a live `*mut NetworkSink`.
+        // SAFETY: caller contract — `raw` is a live `*mut NetworkSink` (the
+        // wrapper's `m_ctx`, its allocation root).
         NETWORK_SINK => SinkHandle::S3Upload(unsafe {
-            bun_ptr::BackRef::from_raw_mut(raw.cast::<streams::NetworkSink>())
+            bun_ptr::BackRef::from_root(raw.cast::<streams::NetworkSink>())
         }),
         // SAFETY: caller contract — `raw` is a live `*mut H3ResponseSink`.
         H3_RESPONSE_SINK => SinkHandle::H3Response(unsafe {
