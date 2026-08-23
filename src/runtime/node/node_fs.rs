@@ -7206,33 +7206,13 @@ impl NodeFS {
         }
 
         let dest = args.path.slice_z(&mut self.sync_error_buf);
-        // The original implementation mapped the unlink/rmdir error through a
+        // The original implementation mapped the unlink error through a
         // *narrow* table to an errno, defaulting to `EFAULT`. We go straight to
-        // `bun_sys::unlink`/`bun_sys::posix_rmdir` (raw errno), so route the result
-        // through `map_rm_errno_narrow` to preserve the EFAULT fallthrough
-        // (e.g. `EISDIR` with `recursive=false` must surface as `EFAULT`).
+        // `bun_sys::unlink` (raw errno), so route the result through
+        // `map_rm_errno_narrow` to preserve the EFAULT fallthrough (e.g.
+        // `EISDIR` with `recursive=false` must surface as `EFAULT`).
         if let Err(err1) = sys::unlink(dest) {
             let e1 = err1.get_errno();
-            // empirically, it seems to return AccessDenied when the
-            // file is actually a directory on macOS.
-            // Matches the original `IsDir|NotDir|AccessDenied` set; EPERM mapped
-            // to PermissionDenied (not AccessDenied) there, so raw EPERM is
-            // intentionally *not* in this set.
-            if args.recursive && matches!(e1, E::EISDIR | E::ENOTDIR | E::EACCES) {
-                #[cfg(not(windows))]
-                let removed = sys::posix_rmdir(dest);
-                #[cfg(windows)]
-                let removed = sys::rmdir(dest);
-                if let Err(err2) = removed {
-                    let e2 = err2.get_errno();
-                    if e2 == E::ENOENT && args.force {
-                        return Ok(());
-                    }
-                    return Err(sys::Error::from_code(map_rm_errno_narrow(e2), sys::Tag::rm)
-                        .with_path(args.path.slice()));
-                }
-                return Ok(());
-            }
             if e1 == E::ENOENT {
                 if args.force {
                     return Ok(());
