@@ -4277,14 +4277,10 @@ impl DuplexUpgradeContext {
             // duplex events — skip the TLSSocket instead of hitting
             // `has_handlers() == false` in `onOpen`.
             //
-            // Refcount: `tls.socket` is `InternalSocket::UpgradedDuplex`
-            // here (assigned in `js_upgrade_duplex_to_tls` *before*
-            // `start_tls()` enqueues anything and before any duplex
-            // callback can dispatch), so `handle_connect_error`'s
-            // `io_ref` is taken (`!is_detached()`) and it consumes
-            // the owner's +1 we hold. Do NOT let `RefPtr::Drop`
-            // fire on top of that (over-deref → UAF on the JS wrapper's
-            // pointee).
+            // Refcount: `adopt_io_ref` installs our +1 as the socket's
+            // `io_ref` and `handle_connect_error` releases it. Do NOT let
+            // `RefPtr::Drop` fire on top of that (over-deref → UAF on
+            // the JS wrapper's pointee).
             //
             // Neuter the JS listener thunks now, while the wrapper is still
             // strongly held, so the later `StartTLS` → `deinit` → `Drop`
@@ -4368,9 +4364,8 @@ impl DuplexUpgradeContext {
                     }
                     let errno = sys::SystemErrno::ECONNREFUSED as c_int;
                     if let Some(tls) = this.tls.replace(None) {
-                        // `handle_connect_error` consumes our +1 — `tls.socket`
-                        // is `InternalSocket::UpgradedDuplex` (set before
-                        // `start_tls()` was queued, so `!is_detached()`) — and detaches. Null
+                        // `handle_connect_error` consumes our +1 (installed as
+                        // `io_ref` by `adopt_io_ref`) and detaches. Null
                         // `this.tls` so `deinit` doesn't deref again.
                         //
                         // Neuter the JS listener thunks now, while the wrapper
