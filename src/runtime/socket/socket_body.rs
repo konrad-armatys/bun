@@ -435,8 +435,6 @@ impl<const SSL: bool> NewSocket<SSL> {
         self.flags.set(v);
     }
 
-    /// Take the [`io_ref`](Self::io_ref) for the native owner now pointing at
-    /// this socket.
     /// The per-`SSL` ex-data slot `on_open` points back at the owning socket
     /// through (read by the ALPN select callback).
     fn tls_socket_slot() -> &'static boringssl_sys::ExDataSlot<Self> {
@@ -447,6 +445,8 @@ impl<const SSL: bool> NewSocket<SSL> {
             .expect("SSL selects the matching static")
     }
 
+    /// Take the [`io_ref`](Self::io_ref) for the native owner now pointing at
+    /// this socket.
     pub(crate) fn hold_io_ref(this: ThisPtr<Self>) {
         Self::adopt_io_ref(RefPtr::from_this(this));
     }
@@ -2050,6 +2050,9 @@ impl<const SSL: bool> NewSocket<SSL> {
         // gets its own dispatch — fire its (pre-upgrade) close handler
         // here, then retire it. `raw.twin == None` so this doesn't
         // recurse, and `onClose` derefs the +1 we took at creation.
+        // Before the twin's handlers run: they are user code and may reconnect
+        // this socket, which installs a fresh `io_ref`.
+        let cleanup = CloseTeardown::new(this, &handlers);
         if let Some(raw) = this.twin.with_mut(|t| t.take()) {
             // `on_close` releases the twin's ref via its `CloseTeardown`, so
             // hand it over as the twin's `io_ref`. This frame is the twin's
@@ -2058,7 +2061,6 @@ impl<const SSL: bool> NewSocket<SSL> {
             let raw = Self::adopt_io_ref(raw);
             crate::dispatch::fold(Self::on_close(raw, socket, err, reason));
         }
-        let cleanup = CloseTeardown::new(this, &handlers);
 
         if this.flags.get().contains(Flags::FINALIZING) {
             drop(cleanup);
