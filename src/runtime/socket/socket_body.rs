@@ -327,6 +327,19 @@ pub(super) type SocketHandler<const SSL: bool> = uws::NewSocketHandler<SSL>;
 struct CloseTeardown<const SSL: bool> {
     socket: bun_ptr::ThisPtr<NewSocket<SSL>>,
     entered: Rc<Handlers>,
+    /// The closed native socket's `io_ref`, taken before the user's handler
+    /// runs so a synchronous reconnect can install its own.
+    io_ref: Option<RefPtr<NewSocket<SSL>>>,
+}
+
+impl<const SSL: bool> CloseTeardown<SSL> {
+    fn new(socket: bun_ptr::ThisPtr<NewSocket<SSL>>, entered: &Rc<Handlers>) -> Self {
+        CloseTeardown {
+            socket,
+            entered: Rc::clone(entered),
+            io_ref: socket.io_ref.take(),
+        }
+    }
 }
 
 impl<const SSL: bool> Drop for CloseTeardown<SSL> {
@@ -341,7 +354,9 @@ impl<const SSL: bool> Drop for CloseTeardown<SSL> {
             self.entered.mark_inactive();
         }
         // Last: this can be the final ref, freeing the socket read above.
-        this.release_io_ref();
+        if let Some(r) = self.io_ref.take() {
+            r.deref();
+        }
     }
 }
 
@@ -368,13 +383,15 @@ impl PendingSystemError {
     }
 }
 
-/// `needs_deref` releases the ref the now-detached native socket held. The idle
+/// `io_ref` is the ref the now-detached native socket held. The idle
 /// teardown is gated on the socket still holding the `Handlers` we entered with:
 /// `onConnectError` can reconnect, and we must not tear that connection down.
 struct ConnectErrorTeardown<const SSL: bool> {
     socket: bun_ptr::ThisPtr<NewSocket<SSL>>,
     entered: Rc<Handlers>,
-    needs_deref: bool,
+    /// The failed native socket's `io_ref` (when it had one), taken before the
+    /// user's handler runs so a synchronous reconnect can install its own.
+    io_ref: Option<RefPtr<NewSocket<SSL>>>,
 }
 
 impl<const SSL: bool> Drop for ConnectErrorTeardown<SSL> {
@@ -383,8 +400,8 @@ impl<const SSL: bool> Drop for ConnectErrorTeardown<SSL> {
         // `deref` before `mark_inactive`, as the hand-rolled guard did. It
         // cannot free the socket here: `handle_connect_error`'s `_guard`
         // is declared before this guard, so it outlives it.
-        if self.needs_deref {
-            this.release_io_ref();
+        if let Some(r) = self.io_ref.take() {
+            r.deref();
         }
         if this.handlers_are(&self.entered) {
             this.mark_inactive();
@@ -1095,7 +1112,11 @@ impl<const SSL: bool> NewSocket<SSL> {
         this.buffered_data_for_node_net
             .with_mut(|b| b.clear_and_free());
 
-        let needs_deref = !this.socket.get().is_detached();
+        let io_ref = if this.socket.get().is_detached() {
+            None
+        } else {
+            this.io_ref.take()
+        };
         this.socket.set(SocketHandler::<SSL>::DETACHED);
 
         let vm = handlers.vm;
@@ -1113,7 +1134,7 @@ impl<const SSL: bool> NewSocket<SSL> {
         let cleanup = ConnectErrorTeardown {
             socket: this,
             entered: Rc::clone(&handlers),
-            needs_deref,
+            io_ref,
         };
 
         if vm.script_execution_status() != jsc::ScriptExecutionStatus::Running {
@@ -1255,7 +1276,7 @@ impl<const SSL: bool> NewSocket<SSL> {
         }
 
         // `_scope_guard` (declared after `cleanup`) drops first → scope.exit();
-        // then `cleanup` → needs_deref/mark_inactive/deref.
+        // then `cleanup` → io_ref release/mark_inactive/deref.
         Ok(())
     }
 
@@ -2032,10 +2053,7 @@ impl<const SSL: bool> NewSocket<SSL> {
             let raw = Self::adopt_io_ref(raw);
             crate::dispatch::fold(Self::on_close(raw, socket, err, reason));
         }
-        let cleanup = CloseTeardown {
-            socket: this,
-            entered: Rc::clone(&handlers),
-        };
+        let cleanup = CloseTeardown::new(this, &handlers);
 
         if this.flags.get().contains(Flags::FINALIZING) {
             drop(cleanup);
@@ -4256,7 +4274,7 @@ impl DuplexUpgradeContext {
             // here (assigned in `js_upgrade_duplex_to_tls` *before*
             // `start_tls()` enqueues anything and before any duplex
             // callback can dispatch), so `handle_connect_error`'s
-            // `needs_deref = !is_detached()` is `true` and it consumes
+            // `io_ref` is taken (`!is_detached()`) and it consumes
             // the owner's +1 we hold. Do NOT let `RefPtr::Drop`
             // fire on top of that (over-deref → UAF on the JS wrapper's
             // pointee).
@@ -4345,8 +4363,7 @@ impl DuplexUpgradeContext {
                     if let Some(tls) = this.tls.replace(None) {
                         // `handle_connect_error` consumes our +1 — `tls.socket`
                         // is `InternalSocket::UpgradedDuplex` (set before
-                        // `start_tls()` was queued), so `needs_deref =
-                        // !is_detached()` is true — and detaches. Null
+                        // `start_tls()` was queued, so `!is_detached()`) — and detaches. Null
                         // `this.tls` so `deinit` doesn't deref again.
                         //
                         // Neuter the JS listener thunks now, while the wrapper
