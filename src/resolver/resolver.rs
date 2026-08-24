@@ -3412,6 +3412,7 @@ impl<'a> Resolver<'a> {
             while let Ok(Some(_value)) = dir_iterator.next() {
                 new_entry
                     .add_entry_with_store(
+                        self.rfs(),
                         // SAFETY: see block-wide note above.
                         in_place.map(|existing| unsafe { &mut (*existing).data }),
                         &_value,
@@ -4665,6 +4666,7 @@ impl<'a> Resolver<'a> {
                         };
                         new_entry
                             .add_entry_with_store(
+                                self.rfs(),
                                 // SAFETY: see block-wide note above.
                                 in_place.map(|existing| unsafe { &mut (*existing).data }),
                                 &_value,
