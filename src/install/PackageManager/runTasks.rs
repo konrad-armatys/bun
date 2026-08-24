@@ -10,7 +10,7 @@ use bun_http::{self as http, AsyncHTTP};
 use crate::extract_tarball;
 use crate::network_task::Callback as NetworkTaskCallback;
 use crate::npm;
-use crate::patch_install::{Callback as PatchTaskCallback, PatchTask};
+use crate::patch_install::Callback as PatchTaskCallback;
 use crate::tarball_stream::TarballStream;
 use bun_install::{
     DependencyID, ExtractTarball, INVALID_PACKAGE_ID, NetworkTask, PackageID, PackageManifestError,
@@ -294,7 +294,7 @@ fn process_network_task(
                 let name = name_owned.slice();
                 if log_level.show_progress() {
                     if !*has_updated_this_run {
-                        PackageManager::set_node_name::<true>(
+                        PackageManager::set_node_name(
                             manager.downloads_node_mut(),
                             name,
                             ProgressStrings::DOWNLOAD_EMOJI.as_bytes(),
@@ -781,7 +781,7 @@ fn process_network_task(
 
                 if log_level.show_progress() {
                     if !*has_updated_this_run {
-                        PackageManager::set_node_name::<true>(
+                        PackageManager::set_node_name(
                             manager.downloads_node_mut(),
                             extract.name.slice(),
                             ProgressStrings::EXTRACT_EMOJI.as_bytes(),
@@ -880,7 +880,7 @@ fn process_resolve_task(
                 let manager = ctx.manager();
 
                 if let Some(name) = progress_name {
-                    PackageManager::set_node_name::<true>(
+                    PackageManager::set_node_name(
                         manager.downloads_node_mut(),
                         &name,
                         ProgressStrings::DOWNLOAD_EMOJI.as_bytes(),
@@ -1043,7 +1043,7 @@ fn process_resolve_task(
 
                 if log_level.show_progress() {
                     if !*has_updated_this_run {
-                        PackageManager::set_node_name::<true>(
+                        PackageManager::set_node_name(
                             manager.downloads_node_mut(),
                             alias,
                             ProgressStrings::EXTRACT_EMOJI.as_bytes(),
@@ -1214,7 +1214,7 @@ fn process_resolve_task(
 
                 if log_level.show_progress() {
                     if !*has_updated_this_run {
-                        PackageManager::set_node_name::<true>(
+                        PackageManager::set_node_name(
                             manager.downloads_node_mut(),
                             name,
                             ProgressStrings::DOWNLOAD_EMOJI.as_bytes(),
@@ -1328,7 +1328,7 @@ fn process_resolve_task(
 
                 if log_level.show_progress() {
                     if !*has_updated_this_run {
-                        PackageManager::set_node_name::<true>(
+                        PackageManager::set_node_name(
                             manager.downloads_node_mut(),
                             alias.slice(),
                             ProgressStrings::DOWNLOAD_EMOJI.as_bytes(),
@@ -1562,7 +1562,6 @@ pub fn generate_network_task_for_tarball(
     is_required: bool,
     dependency_id: DependencyID,
     package: &Package,
-    patch_name_and_version_hash: Option<u64>,
     authorization: Authorization,
 ) -> Result<Option<Box<NetworkTask>>, ForTarballError> {
     if has_created_network_task(this, task_id, is_required) {
@@ -1592,34 +1591,6 @@ pub fn generate_network_task_for_tarball(
         return Err(ForTarballError::Offline);
     }
 
-    // reshaped for borrowck —
-    // all `&mut this` uses (patch-task alloc, cache/temp dir, pool slot) happen
-    // first; the immutable `pkg_name`/`scope` borrows are taken afterwards and
-    // live only through `for_tarball`, leaving `this` free for the streaming
-    // tail.
-    // The patched-dependency entry can be missing (or its hash not yet
-    // computed) when install state went stale — e.g. the patch was removed
-    // from package.json, leaving the hash only in
-    // `patched_dependencies_to_remove`. Install the package unpatched instead
-    // of panicking.
-    let patch = patch_name_and_version_hash.and_then(|h| {
-        Some((
-            h,
-            this.lockfile
-                .patched_dependencies
-                .get(&h)?
-                .patchfile_hash()?,
-        ))
-    });
-    let apply_patch_task = if let Some((h, patch_hash)) = patch {
-        let mut task = PatchTask::new_apply_patch_hash(this, package.meta.id, patch_hash, h);
-        if let PatchTaskCallback::Apply(apply) = &mut task.callback {
-            apply.task_id = Some(task_id);
-        }
-        Some(task)
-    } else {
-        None
-    };
     // Borrowed views: `cache_dir` and `temp_dir` are owned by the `PackageManager`
     // singleton and the `TemporaryDirectory` once-cell, respectively. They flow
     // into `ExtractTarball::{cache_dir,temp_dir}`, which must be `Fd` (not `Dir`)
@@ -1627,7 +1598,7 @@ pub fn generate_network_task_for_tarball(
     let cache_dir = directories::get_cache_directory(this);
     let temp_dir = directories::get_temporary_directory(this).handle.fd();
 
-    let mut network_task = NetworkTask::new(task_id, this, apply_patch_task);
+    let mut network_task = NetworkTask::new(task_id, this);
 
     let pkg_name = this.lockfile.str(&package.name);
     let extract_tarball = ExtractTarball {

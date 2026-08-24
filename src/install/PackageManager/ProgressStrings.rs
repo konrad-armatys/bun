@@ -88,11 +88,7 @@ impl ProgressStrings {
 }
 
 impl PackageManager {
-    pub(crate) fn set_node_name<const IS_FIRST: bool>(
-        node: &mut ProgressNode,
-        name: &[u8],
-        emoji: &[u8],
-    ) {
+    pub(crate) fn set_node_name(node: &mut ProgressNode, name: &[u8], emoji: &[u8]) {
         if Output::enable_ansi_colors_stderr() {
             node.set_name_parts(&[emoji, name]);
         } else {
@@ -115,7 +111,7 @@ impl PackageManager {
         let extracted_count = self.extracted_count;
         let pending = self.pending_task_count();
         let dn = self.downloads_node_mut();
-        Self::set_node_name::<true>(
+        Self::set_node_name(
             dn,
             ProgressStrings::DOWNLOAD_NO_EMOJI_.as_bytes(),
             ProgressStrings::DOWNLOAD_EMOJI.as_bytes(),

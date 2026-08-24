@@ -431,7 +431,7 @@ impl LifecycleScriptSubprocess {
         if me.foreground && manager.options.log_level != crate::LogLevel::Silent {
             Output::command(Output::CommandArgv::Single(combined_script.as_bytes()));
         } else if let Some(scripts_node) = manager.scripts_node.as_mut() {
-            PackageManager::set_node_name::<true>(
+            PackageManager::set_node_name(
                 scripts_node,
                 &me.package_name,
                 ProgressStrings::SCRIPT_EMOJI.as_bytes(),

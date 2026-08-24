@@ -732,8 +732,6 @@ impl<'a> PackageInstall<'a> {
         true
     }
 
-    // 1. verify that .bun-tag exists (was it installed from bun?)
-    // 2. check .bun-tag against the resolved version
     /// `<dest>/<name>` as a `ZStr` in the scratch tail of
     /// `destination_dir_subpath_buf`; [`restore_subpath`] puts the NUL back.
     fn subpath_child(&mut self, name: &[u8]) -> &ZStr {

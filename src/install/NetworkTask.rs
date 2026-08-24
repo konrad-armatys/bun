@@ -14,7 +14,7 @@ use bun_url::URL;
 
 use crate::extract_tarball;
 use crate::npm::{self as npm, PackageManifest};
-use crate::{ExtractTarball, PackageManager, PatchTask, TarballStream, Task};
+use crate::{ExtractTarball, PackageManager, TarballStream, Task};
 
 // Adapter so `StringOrTinyString::init_append_if_needed` can intern overflow
 // names into the resolver's filename arena. The bun_sys-level `FilenameStore` exposes `append` /
@@ -48,10 +48,6 @@ pub struct NetworkTask {
     /// process and outlives every task.
     pub(crate) package_manager: bun_ptr::BackRef<PackageManager>,
     pub(crate) callback: Callback,
-    /// Key in patchedDependencies in package.json. Carried, never applied
-    /// here: the install phase creates its own `PatchTask`.
-    #[allow(dead_code)]
-    pub(crate) apply_patch_task: Option<Box<PatchTask>>,
     pub(crate) next: bun_threading::Link<NetworkTask>,
 
     /// Producer/consumer buffer that feeds tarball bytes from the HTTP thread
@@ -132,7 +128,6 @@ impl NetworkTask {
     pub(crate) fn new(
         task_id: crate::package_manager_task::Id,
         package_manager: &PackageManager,
-        apply_patch_task: Option<Box<PatchTask>>,
     ) -> Box<NetworkTask> {
         Box::new(NetworkTask {
             http: None,
@@ -142,7 +137,6 @@ impl NetworkTask {
             response_buffer: MutableString::init_empty(),
             package_manager: bun_ptr::BackRef::new(package_manager),
             callback: Callback::LocalTarball,
-            apply_patch_task,
             next: bun_threading::Link::new(),
             tarball_stream: None,
             streaming_extract_task: None,

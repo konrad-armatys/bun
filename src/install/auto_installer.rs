@@ -337,7 +337,6 @@ impl hooks::AutoInstaller for PackageManager {
         package_id: PackageID,
         resolution: &hooks::Resolution,
         ctx: hooks::TaskCallbackContext,
-        patch_name_and_version_hash: Option<u64>,
     ) -> Result<(), bun_core::Error> {
         let r = resolution_from_hooks(resolution);
         // Only the npm arm reaches this enqueue.
@@ -359,7 +358,6 @@ impl hooks::AutoInstaller for PackageManager {
             npm.version,
             npm.url,
             crate::TaskCallbackContext::RootRequestId(ctx.root_request_id),
-            patch_name_and_version_hash,
         )
         .map_err(|e| crate::Error::from(e).into())
     }

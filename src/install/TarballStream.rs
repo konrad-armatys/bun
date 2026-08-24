@@ -553,10 +553,6 @@ impl TarballStream {
             _ => unreachable!(),
         }
 
-        // `task.apply_patch_task` is intentionally not touched: the
-        // buffered `.extract` path (`enqueue_extract_npm_package` →
-        // `Task.callback`) never populates it for npm tarballs either —
-        // patching is handled later by the install phase.
         shared.resolve_tasks.push(task);
         shared.wake();
     }

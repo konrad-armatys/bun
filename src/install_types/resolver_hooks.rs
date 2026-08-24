@@ -1591,7 +1591,6 @@ pub trait AutoInstaller {
         package_id: PackageID,
         resolution: &Resolution,
         ctx: TaskCallbackContext,
-        patch_name_and_version_hash: Option<u64>,
     ) -> core::result::Result<(), bun_core::Error>;
     fn resolve_from_disk_cache(
         &mut self,

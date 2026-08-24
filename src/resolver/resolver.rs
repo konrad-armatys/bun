@@ -3124,7 +3124,6 @@ impl<'a> Resolver<'a> {
                                                 resolved_package_id,
                                                 &resolution,
                                                 Install::TaskCallbackContext { root_request_id: 0 },
-                                                None,
                                             )
                                         {
                                             if let Some(d) = self.debug_logs.as_mut() {

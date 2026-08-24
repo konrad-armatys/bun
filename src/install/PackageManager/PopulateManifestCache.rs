@@ -59,7 +59,7 @@ fn start_manifest_task(
         manager.start_progress_bar_if_none();
     }
 
-    let mut task = NetworkTask::new(task_id, manager, None);
+    let mut task = NetworkTask::new(task_id, manager);
     {
         let PackageManager {
             log, env, options, ..

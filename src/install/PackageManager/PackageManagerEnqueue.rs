@@ -157,7 +157,6 @@ pub fn enqueue_tarball_for_download(
     package_id: PackageID,
     url: StringOrTinyString,
     task_context: TaskCallbackContext,
-    patch_name_and_version_hash: Option<u64>,
 ) -> Result<(), EnqueueTarballForDownloadError> {
     let task_id = Task::Id::for_tarball(url.slice());
     if this.network_task_has_failed(task_id) {
@@ -193,7 +192,6 @@ pub fn enqueue_tarball_for_download(
         is_required,
         dependency_id,
         &package,
-        patch_name_and_version_hash,
         crate::network_task::Authorization::NoAuthorization,
     )? {
         // The HTTP thread takes the task over until its terminal callback
@@ -437,7 +435,6 @@ pub fn enqueue_package_for_download(
     version: Semver::Version,
     url: Semver::String,
     task_context: TaskCallbackContext,
-    patch_name_and_version_hash: Option<u64>,
 ) -> Result<(), EnqueuePackageForDownloadError> {
     let (task_id, url) = {
         let string_buf = this.lockfile.buffers.string_bytes.as_slice();
@@ -480,7 +477,6 @@ pub fn enqueue_package_for_download(
         is_required,
         dependency_id,
         &package,
-        patch_name_and_version_hash,
         crate::network_task::Authorization::AllowAuthorization,
     )? {
         // The HTTP thread takes the task over until its terminal callback
@@ -1220,7 +1216,7 @@ pub fn enqueue_dependency_with_main_and_success_fn(
                                     );
                                 }
 
-                                let mut network_task = NetworkTask::new(task_id, this, None);
+                                let mut network_task = NetworkTask::new(task_id, this);
                                 {
                                     let PackageManager {
                                         log, env, options, ..
@@ -1483,7 +1479,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
                     resolution: res,
                     ..Package::default()
                 },
-                None,
                 crate::network_task::Authorization::NoAuthorization,
             ) {
                 // --offline miss: already reported (if required) / skipped (if optional)
@@ -1704,7 +1699,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
                                 resolution: res,
                                 ..Package::default()
                             },
-                            None,
                             crate::network_task::Authorization::NoAuthorization,
                         ) {
                             // --offline miss: already reported / skipped
@@ -1744,10 +1738,6 @@ fn warn_unmet_peer_dependency(
 /// Shared by the buffered path (`enqueueExtractNPMPackage`) and the
 /// streaming path (`createExtractTaskForStreaming`) so both produce
 /// an identical Task shape; only the return type differs.
-///
-/// Intentionally does *not* move `network_task.apply_patch_task`: the
-/// install phase creates its own PatchTask via `PackageInstaller`, so
-/// applying it here would run the patch twice.
 fn init_extract_task(
     this: &PackageManager,
     tarball: &ExtractTarball,
@@ -2216,7 +2206,6 @@ fn get_or_put_resolved_package_with_find_result(
                             behavior.is_required(),
                             dependency_id,
                             &package,
-                            name_and_version_hash,
                             // its npm.
                             crate::network_task::Authorization::AllowAuthorization,
                         )?
@@ -2907,16 +2896,8 @@ impl PackageManager {
         package_id: PackageID,
         url: StringOrTinyString,
         task_context: TaskCallbackContext,
-        patch_name_and_version_hash: Option<u64>,
     ) -> Result<(), EnqueueTarballForDownloadError> {
-        enqueue_tarball_for_download(
-            self,
-            dependency_id,
-            package_id,
-            url,
-            task_context,
-            patch_name_and_version_hash,
-        )
+        enqueue_tarball_for_download(self, dependency_id, package_id, url, task_context)
     }
 
     #[inline]
@@ -2966,7 +2947,6 @@ impl PackageManager {
         version: Semver::Version,
         url: Semver::String,
         task_context: TaskCallbackContext,
-        patch_name_and_version_hash: Option<u64>,
     ) -> Result<(), EnqueuePackageForDownloadError> {
         enqueue_package_for_download(
             self,
@@ -2976,7 +2956,6 @@ impl PackageManager {
             version,
             url,
             task_context,
-            patch_name_and_version_hash,
         )
     }
 }
