@@ -8,7 +8,7 @@ use crate::jsc::{
 use crate::shared::query_ctor_args::QueryCtorArgs;
 use bun_core::String as BunString;
 use bun_jsc::JsCell;
-use bun_ptr::{AsCtxPtr, RefPtr};
+use bun_ptr::{BackRef, RefPtr, ThisPtr};
 
 use super::PostgresSQLConnection;
 use super::PostgresSQLStatement;
@@ -38,38 +38,47 @@ pub use crate::jsc::codegen::JSPostgresSQLQuery as js;
 // previous `from_mut(self)` raw-pointer dances papered over.
 #[derive(bun_ptr::CellRefCounted)]
 pub struct PostgresSQLQuery {
-    pub(crate) statement: Cell<Option<*mut PostgresSQLStatement>>,
+    /// The ref this query holds on its statement (also referenced by the
+    /// connection's prepared-statement map for named statements).
+    pub(crate) statement: JsCell<Option<RefPtr<PostgresSQLStatement>>>,
     pub(crate) query: BunString,
 
     pub(crate) this_value: JsCell<JsRef>,
 
     pub(crate) status: Cell<Status>,
 
-    // bun.ptr.RefCount(@This(), "ref_count", deinit, .{}) — intrusive single-thread refcount.
-    // `#[derive(CellRefCounted)]` provides `ref_()`/`deref()` and the `AnyRefCounted`
-    // bridge so `RefPtr<PostgresSQLQuery>` brackets re-entrant callback paths.
+    // Intrusive single-thread refcount (`CellRefCounted`): held as `RefPtr`
+    // (connection request queue, JS wrapper) / `ref_guard()` (re-entrant paths).
     ref_count: Cell<u32>,
 
     pub(crate) flags: Cell<Flags>,
+    /// This allocation's root pointer, for the `&self` paths that take refs
+    /// on it (`ref_guard`, the connection's request queue).
+    this_ptr: Cell<Option<BackRef<PostgresSQLQuery, bun_ptr::Root>>>,
 }
 
-// `destroy` is `heap::take` in `deref_`.
 impl Drop for PostgresSQLQuery {
     fn drop(&mut self) {
         self.release_statement();
     }
 }
 
-impl Default for PostgresSQLQuery {
-    fn default() -> Self {
-        Self {
-            statement: Cell::new(None),
-            query: BunString::EMPTY,
+impl PostgresSQLQuery {
+    /// Heap-allocate a query; the returned ref is the one its JS wrapper
+    /// adopts (`js::to_js`; released by `finalize`).
+    fn new(query: BunString, flags: Flags) -> ThisPtr<Self> {
+        let this = RefPtr::new(Self {
+            statement: JsCell::new(None),
+            query,
             this_value: JsCell::new(JsRef::empty()),
             status: Cell::new(Status::Pending),
             ref_count: Cell::new(1),
-            flags: Cell::new(Flags::default()),
-        }
+            flags: Cell::new(flags),
+            this_ptr: Cell::new(None),
+        })
+        .into_this_ptr();
+        this.this_ptr.set(Some(this.into()));
+        this
     }
 }
 
@@ -115,8 +124,6 @@ impl Default for Flags {
 pub use bun_sql::shared::query_status::Status;
 
 impl PostgresSQLQuery {
-    // `ref_()`/`deref()` provided by `#[derive(CellRefCounted)]`.
-
     // ─── R-2 interior-mutability helpers ─────────────────────────────────────
 
     /// Read-modify-write the `Cell<Flags>` through `&self`.
@@ -127,44 +134,31 @@ impl PostgresSQLQuery {
         self.flags.set(v);
     }
 
-    /// Hold a ref on `self` for the guard's lifetime (across re-entrant calls).
+    /// This allocation's root pointer (see the `this_ptr` field).
+    #[inline]
+    pub(crate) fn this_ptr(&self) -> ThisPtr<Self> {
+        self.this_ptr
+            .get()
+            .expect("PostgresSQLQuery used before PostgresSQLQuery::new")
+            .this_ptr()
+    }
+
+    /// Holds a ref on `self` for the guard's scope.
     #[inline]
     pub(crate) fn ref_guard(&self) -> RefPtr<Self> {
-        // SAFETY: `self` is the live heap allocation.
-        unsafe { RefPtr::init_ref(self.as_ctx_ptr()) }
+        RefPtr::from_this(self.this_ptr())
     }
 
-    /// Dereference the intrusive `statement` pointer as `&mut`. Mirrors
-    /// [`MySQLQuery::get_statement`]: one unchecked deref here replaces N inline
-    /// raw-pointer derefs at every protocol dispatch site in
-    /// `PostgresSQLConnection::on`.
-    ///
-    /// SAFETY (encapsulated): when `Some`, the pointer is a live `heap::alloc`
-    /// payload kept alive by the intrusive ref this query holds (`ref_()` taken
-    /// at `statement.set(Some(_))`). All mutation is single-JS-thread so the
-    /// `&mut` is exclusive for the borrow's lifetime; callers must not hold two
-    /// results live simultaneously (the request FIFO never does).
+    /// This query's statement, if it has one yet.
     #[inline]
-    #[allow(clippy::mut_from_ref)] // intrusive raw pointer; see SAFETY in doc comment
-    pub(crate) fn statement_mut(&self) -> Option<&mut PostgresSQLStatement> {
-        // SAFETY: see doc comment — intrusive ref held by `self` keeps the
-        // pointee alive; single-JS-thread exclusivity.
-        self.statement.get().map(|p| unsafe { &mut *p })
+    pub(crate) fn statement(&self) -> Option<&PostgresSQLStatement> {
+        self.statement.get().as_deref()
     }
 
-    /// Release the intrusive ref this query holds on its `statement`, clearing
-    /// the field. One audited deref here replaces the per-site
-    /// `this.statement.set(None)` + `PostgresSQLStatement::deref(stmt)` pair on
-    /// `Drop` and `do_run`'s error paths (6 callers).
+    /// Release the ref this query holds on its `statement`, clearing the field.
     #[inline]
     pub(crate) fn release_statement(&self) {
-        if let Some(stmt) = self.statement.take() {
-            // SAFETY: when `Some`, `stmt` is a live `heap::alloc` payload kept
-            // alive by the intrusive ref this query took when it was stored
-            // into `self.statement` (`ref_()` / `init_exact_refs`). This
-            // releases exactly that ref; may free if no other refs remain.
-            unsafe { PostgresSQLStatement::deref(stmt) };
-        }
+        drop(self.statement.replace(None));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -194,7 +188,7 @@ impl PostgresSQLQuery {
         queries_array: JSValue,
     ) {
         // R-2: every field touched below is `Cell`/`JsCell`-backed, so `&self`
-        // is sufficient and `noalias` is suppressed. `RefPtr` brackets the
+        // is sufficient and `noalias` is suppressed. `ref_guard()` brackets the
         // JS-re-entrant `run_callback` so a re-entrant `deref()` cannot free
         // `*self` mid-body.
         let _guard = self.ref_guard();
@@ -207,13 +201,9 @@ impl PostgresSQLQuery {
             return;
         };
 
-        // SAFETY: JS-thread only; short-lived `&mut` to the singleton VM, no other live borrow.
-        let vm = crate::jsc::VirtualMachine::get().as_mut();
+        let vm = crate::jsc::VirtualMachine::get();
         let function = vm
-            .sql_state()
-            .postgresql_context
-            .on_query_reject_fn
-            .get()
+            .with_sql_state(|s| s.postgresql_context.on_query_reject_fn.get())
             .unwrap();
         let event_loop = vm.event_loop_mut();
         let js_err = postgres_error_to_js(global_object, None, err);
@@ -230,7 +220,7 @@ impl PostgresSQLQuery {
     }
 
     pub(crate) fn on_js_error(&self, err: JSValue, global_object: &JSGlobalObject) {
-        // R-2: see `on_write_fail` — `&self` + Cell/JsCell, RefPtr brackets re-entry.
+        // R-2: see `on_write_fail` — `&self` + Cell/JsCell, `ref_guard()` brackets re-entry.
         let _guard = self.ref_guard();
         self.status.set(Status::Fail);
         let Some(this_value) = self.this_value.get().try_get() else {
@@ -241,13 +231,9 @@ impl PostgresSQLQuery {
             return;
         };
 
-        // SAFETY: JS-thread only; short-lived `&mut` to the singleton VM, no other live borrow.
-        let vm = crate::jsc::VirtualMachine::get().as_mut();
+        let vm = crate::jsc::VirtualMachine::get();
         let function = vm
-            .sql_state()
-            .postgresql_context
-            .on_query_reject_fn
-            .get()
+            .with_sql_state(|s| s.postgresql_context.on_query_reject_fn.get())
             .unwrap();
         let event_loop = vm.event_loop_mut();
         event_loop.run_callback(
@@ -287,7 +273,7 @@ impl PostgresSQLQuery {
         connection: JSValue,
         is_last: bool,
     ) {
-        // R-2: see `on_write_fail` — `&self` + Cell/JsCell, RefPtr brackets re-entry.
+        // R-2: see `on_write_fail` — `&self` + Cell/JsCell, `ref_guard()` brackets re-entry.
         let _guard = self.ref_guard();
         self.status.set(if is_last {
             Status::Success
@@ -314,13 +300,9 @@ impl PostgresSQLQuery {
             return;
         };
 
-        // SAFETY: JS-thread only; short-lived `&mut` to the singleton VM, no other live borrow.
-        let vm = crate::jsc::VirtualMachine::get().as_mut();
+        let vm = crate::jsc::VirtualMachine::get();
         let function = vm
-            .sql_state()
-            .postgresql_context
-            .on_query_resolve_fn
-            .get()
+            .with_sql_state(|s| s.postgresql_context.on_query_resolve_fn.get())
             .unwrap();
         let event_loop = vm.event_loop_mut();
 
@@ -371,26 +353,19 @@ impl PostgresSQLQuery {
             simple,
         } = QueryCtorArgs::parse(global_this, callframe.arguments())?;
 
-        let ptr = bun_core::heap::into_raw(Box::new(PostgresSQLQuery::default()));
-
-        // SAFETY: ptr was just allocated and is the m_ctx payload; toJS wraps it in the JSCell.
-        let this_value = js::to_js(ptr, global_this);
-        this_value.ensure_still_alive();
-
-        // SAFETY: ptr is exclusively owned here until returned to JS.
-        // Note: `PostgresSQLQuery` implements `Drop`, so functional-record-update
-        // (`..Default::default()`) is forbidden (E0509). `ptr` was already
-        // `default()`-initialised by `Box::new` above, so just overwrite the
-        // three non-default fields in place.
-        unsafe {
-            (*ptr).query = query.to_bun_string(global_this)?;
-            (*ptr).this_value.set(JsRef::init_weak(this_value));
-            (*ptr).flags.set(Flags {
+        let this = PostgresSQLQuery::new(
+            query.to_bun_string(global_this)?,
+            Flags {
                 bigint,
                 simple,
                 ..Default::default()
-            });
-        }
+            },
+        );
+
+        // The JS wrapper adopts the allocation's first ref.
+        let this_value = js::to_js(this.as_ptr(), global_this);
+        this_value.ensure_still_alive();
+        this.this_value.set(JsRef::init_weak(this_value));
 
         js::binding_set_cached(this_value, global_this, values);
         js::pending_value_set_cached(this_value, global_this, pending_value);
@@ -447,25 +422,13 @@ impl PostgresSQLQuery {
         Ok(JSValue::UNDEFINED)
     }
 
-    //
-    // Takes `*mut Self` (the JSCell m_ctx payload, i.e. the original `heap::alloc`
-    // pointer) rather than `&Self`: `connection.requests.write_item(this_ptr)` below
-    // stashes this pointer in a long-lived FIFO, and a `&self`-derived `*mut` would carry
-    // borrow-scoped provenance that is invalidated once codegen reuses m_ctx after this
-    // call returns (Stacked Borrows). Passing the raw payload pointer through preserves
-    // the allocation's root provenance for the queued entry.
+    // The connection's request queue takes its own ref on `this` (`RefPtr::from_this`)
+    // once the query is enqueued; the JS wrapper (on-stack for this call) holds the other.
     pub fn do_run(
         this: &Self,
         global_object: &JSGlobalObject,
         callframe: &CallFrame,
     ) -> JsResult<JSValue> {
-        // R-2: `this` is the live m_ctx payload for `callframe.this()`; the JS
-        // wrapper is on-stack so GC cannot finalize it. Every mutated field is
-        // `Cell`/`JsCell`-backed, so `&Self` suffices. The pointer pushed into
-        // `connection.requests` is derived via `core::ptr::from_ref(this).cast_mut()`
-        // (write provenance is recovered from the JsCell-backed queue, never from
-        // this shared borrow).
-        let this_ptr: *mut Self = core::ptr::from_ref(this).cast_mut();
         let arguments = callframe.arguments();
         // `from_js_ref` wraps the m_ctx payload in a `ParentRef` — the JS wrapper
         // is on-stack (rooted by `arguments[0]`) so GC cannot finalize it for the
@@ -488,15 +451,12 @@ impl PostgresSQLQuery {
         let this_value = callframe.this();
         let binding_value = js::binding_get_cached(this_value).unwrap_or_default();
         let query_str = this.query.to_utf8();
+        // query_str: Utf8Slice<'_> — Drop frees.
         let writer = connection.writer();
-        // We need a strong reference to the query so that it doesn't get GC'd
-        this.ref_();
         // Shared cleanup for every error-return path below: drop any statement
-        // ref this query took plus the speculative `ref_()` above.
+        // ref this query took.
         let release_query_ref = || {
             this.release_statement();
-            // SAFETY: undoes the speculative `this.ref_()` above; count was ≥2, never frees here.
-            unsafe { Self::deref(this_ptr) };
         };
         // Shared error tail: throw `err` as a postgres error unless an exception
         // is already pending.
@@ -514,18 +474,11 @@ impl PostgresSQLQuery {
         if this.flags.get().simple {
             bun_core::scoped_log!(Postgres, "executeQuery");
 
-            // PostgresSQLStatement is intrusively refcounted; allocate a fresh box and
-            // hand ownership to `this.statement` (count = 1).
-            // NOTE: PostgresSQLStatement implements Drop, so functional-record-update
-            // (`..Default::default()`) is forbidden (E0509). Build + mutate instead.
-            let stmt: *mut PostgresSQLStatement = {
-                let mut s = PostgresSQLStatement::default();
-                s.signature = Signature::empty();
-                s.status = StatementStatus::Parsing;
-                bun_core::heap::into_raw(Box::new(s))
-            };
             // Query is simple and it's the only owner of the statement
-            this.statement.set(Some(stmt));
+            this.statement.set(Some(PostgresSQLStatement::new(
+                Signature::empty(),
+                StatementStatus::Parsing,
+            )));
 
             let can_execute = !connection.has_query_running();
             if can_execute {
@@ -546,11 +499,7 @@ impl PostgresSQLQuery {
             } else {
                 this.status.set(Status::Pending);
             }
-            if connection
-                .requests
-                .with_mut(|q| q.write_item(this_ptr))
-                .is_err()
-            {
+            if !connection.enqueue_request(this.this_ptr()) {
                 release_query_ref();
                 return Err(global_object.throw_out_of_memory());
             }
@@ -581,7 +530,7 @@ impl PostgresSQLQuery {
         let columns_value: JSValue =
             js::columns_get_cached(this_value).unwrap_or(JSValue::UNDEFINED);
 
-        let mut signature = match Signature::generate(
+        let signature = match Signature::generate(
             global_object,
             query_str.slice(),
             binding_value,
@@ -594,8 +543,6 @@ impl PostgresSQLQuery {
         ) {
             Ok(s) => s,
             Err(err) => {
-                // SAFETY: undoes the speculative `this.ref_()` above; count was ≥2, never frees here.
-                unsafe { Self::deref(this_ptr) };
                 if !global_object.has_exception() {
                     return Err(global_object.throw_sql_error(err, "failed to generate signature"));
                 }
@@ -606,10 +553,9 @@ impl PostgresSQLQuery {
         let has_params = signature.fields.len() > 0;
         let mut did_write = false;
         'enqueue: {
-            // Note: `connection_entry_value` is a *mut into connection.statements value slot;
-            // holding a `&mut` across other &mut connection borrows below trips borrowck, so
-            // store the raw `*mut *mut PostgresSQLStatement` and re-dereference at use sites.
-            let mut connection_entry_value: Option<*mut *mut PostgresSQLStatement> = None;
+            // Whether `connection.statements` has a slot reserved under
+            // `signature.name` for the statement this query will create.
+            let mut has_connection_entry = false;
             if !connection
                 .flags
                 .get()
@@ -622,27 +568,19 @@ impl PostgresSQLQuery {
                     .statements
                     .get()
                     .get(&signature.name[..])
-                    .copied();
-                if let Some(stmt_ptr) = existing_stmt {
-                    this.statement.set(Some(stmt_ptr));
-                    // Route the `&mut` through the audited `statement_mut()`
-                    // accessor (just set above ⇒ `Some`); `stmt_ptr` is kept
-                    // only for the explicit `deref(stmt_ptr)` cleanup below.
-                    let stmt = this.statement_mut().expect("statement set above");
-                    stmt.ref_();
+                    .and_then(|slot| slot.as_ref().cloned());
+                if let Some(stmt) = existing_stmt {
+                    // This query's ref on the shared statement.
+                    this.statement.set(Some(stmt));
+                    let stmt = this.statement().expect("statement set above");
                     drop(signature);
 
-                    match stmt.status {
+                    match stmt.status.get() {
                         StatementStatus::Failed => {
-                            this.statement.set(None);
                             // `error_response` is `Some` when status == Failed.
-                            let error_response =
-                                stmt.error_response.as_ref().unwrap().to_js(global_object)?;
-                            // SAFETY: drop the ref we took above.
-                            unsafe { PostgresSQLStatement::deref(stmt_ptr) };
-                            // SAFETY: undoes the speculative `this.ref_()` above; count was ≥2, never frees here.
-                            unsafe { Self::deref(this_ptr) };
-                            return Err(global_object.throw_value(error_response));
+                            let error_response = stmt.error_response_to_js(global_object);
+                            this.release_statement();
+                            return Err(global_object.throw_value(error_response?));
                         }
                         StatementStatus::Prepared => {
                             // Only write ahead of the FIFO drain when every queued
@@ -652,7 +590,7 @@ impl PostgresSQLQuery {
                             if (!connection.has_query_running() || connection.can_pipeline())
                                 && connection.pending_requests.get() == 0
                             {
-                                this.update_flags(|f| f.binary = !stmt.fields.is_empty());
+                                this.update_flags(|f| f.binary = !stmt.fields.get().is_empty());
                                 bun_core::scoped_log!(Postgres, "bindAndExecute");
 
                                 // bindAndExecute will bind + execute, it will change to running after binding is complete
@@ -688,24 +626,19 @@ impl PostgresSQLQuery {
 
                     break 'enqueue;
                 }
-                // `JsCell::with_mut` scopes the `&mut PreparedStatementsMap` to
-                // the `get_or_put` call (single-JS-thread; no re-entry into JS
-                // until after the raw value-slot ptr is captured). Extract the
-                // raw slot ptr while the borrow is live so the remainder of
-                // this block needs no further `&mut` to the map.
-                let entry_value_ptr = match connection.statements.with_mut(|s| {
-                    s.get_or_put(&signature.name)
-                        .map(|e| std::ptr::from_mut::<*mut PostgresSQLStatement>(e.value_ptr))
-                }) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        drop(signature);
-                        release_query_ref();
-                        return Err(global_object
-                            .throw_error(crate::Error::from(err), "failed to allocate statement"));
-                    }
-                };
-                connection_entry_value = Some(entry_value_ptr);
+                // Reserve the map slot now (empty) so an allocation failure
+                // surfaces before anything is written; filled in below once
+                // the statement exists.
+                if let Err(err) = connection
+                    .statements
+                    .with_mut(|s| s.get_or_put(&signature.name).map(|_| ()))
+                {
+                    drop(signature);
+                    release_query_ref();
+                    return Err(global_object
+                        .throw_error(crate::Error::from(err), "failed to allocate statement"));
+                }
+                has_connection_entry = true;
             }
             let can_execute = !connection.has_query_running();
 
@@ -719,9 +652,9 @@ impl PostgresSQLQuery {
                         query_str.slice(),
                         binding_value,
                         writer,
-                        &mut signature,
+                        &signature,
                     ) {
-                        if connection_entry_value.is_some() {
+                        if has_connection_entry {
                             let _ = connection
                                 .statements
                                 .with_mut(|m| m.remove(&signature.name[..]));
@@ -753,7 +686,7 @@ impl PostgresSQLQuery {
                         &signature.fields,
                         writer,
                     ) {
-                        if connection_entry_value.is_some() {
+                        if has_connection_entry {
                             let _ = connection
                                 .statements
                                 .with_mut(|m| m.remove(&signature.name[..]));
@@ -763,7 +696,7 @@ impl PostgresSQLQuery {
                         return Err(throw_write_error(b"failed to write query", err));
                     }
                     if let Err(err) = writer.write(&protocol::SYNC) {
-                        if connection_entry_value.is_some() {
+                        if has_connection_entry {
                             let _ = connection
                                 .statements
                                 .with_mut(|m| m.remove(&signature.name[..]));
@@ -785,52 +718,35 @@ impl PostgresSQLQuery {
                 // parseAndBindAndExecute(), preventing PgBouncer from splitting them.
             }
             {
-                // we only have connection_entry_value if we are using named prepared statements
-                if let Some(entry_value) = connection_entry_value {
+                let stmt = PostgresSQLStatement::new(
+                    signature,
+                    if did_write {
+                        StatementStatus::Parsing
+                    } else {
+                        StatementStatus::Pending
+                    },
+                );
+                // we only have a connection entry if we are using named prepared statements
+                if has_connection_entry {
                     connection
                         .prepared_statement_id
                         .set(connection.prepared_statement_id.get() + 1);
-                    // ref_count starts at 2 (one for this.statement,
-                    // one for the connection.statements map).
-                    let stmt = {
-                        let mut s = PostgresSQLStatement::default();
-                        s.signature = signature;
-                        s.init_exact_refs(2);
-                        s.status = if did_write {
-                            StatementStatus::Parsing
-                        } else {
-                            StatementStatus::Pending
-                        };
-                        bun_core::heap::into_raw(Box::new(s))
-                    };
-                    this.statement.set(Some(stmt));
-
-                    // SAFETY: `entry_value` points into `connection.statements` and the map has
-                    // not been mutated since `get_or_put`. `get_or_put` runs only after the
-                    // existing-entry probe missed, so the slot it hands back was
-                    // default-initialised to null and a plain store is fine.
-                    unsafe { *entry_value = stmt };
-                } else {
-                    let stmt = {
-                        let mut s = PostgresSQLStatement::default();
-                        s.signature = signature;
-                        s.status = if did_write {
-                            StatementStatus::Parsing
-                        } else {
-                            StatementStatus::Pending
-                        };
-                        bun_core::heap::into_raw(Box::new(s))
-                    };
-                    this.statement.set(Some(stmt));
+                    // Two refs: one for this.statement, one for the
+                    // connection.statements map slot reserved above.
+                    let for_map = stmt.clone();
+                    connection.statements.with_mut(|m| {
+                        match m.get_mut(&for_map.signature.name[..]) {
+                            Some(slot @ None) => *slot = Some(for_map),
+                            // Gone, or already filled by a re-entrant run.
+                            _ => drop(for_map),
+                        }
+                    });
                 }
+                this.statement.set(Some(stmt));
             }
         }
 
-        if connection
-            .requests
-            .with_mut(|q| q.write_item(this_ptr))
-            .is_err()
-        {
+        if !connection.enqueue_request(this.this_ptr()) {
             release_query_ref();
             return Err(global_object.throw_out_of_memory());
         }
