@@ -140,11 +140,14 @@ impl<P: StaticPipeWriterProcess> StaticPipeWriter<P> {
     }
 
     pub fn start(this: bun_ptr::ThisPtr<Self>) -> bun_sys::Result<()> {
+        // A synchronous failure inside `start_impl` can run `on_close`, which
+        // releases both the owner's ref and `start_ref`; hold one more so the
+        // error path below it still has a live writer.
+        let _guard = RefPtr::from_this(this);
         // SAFETY: see impl-level note; momentary field access. The in-flight
         // ref is minted from the root pointer (it may be released as the last).
         unsafe { (*this.as_ptr()).start_ref = Some(RefPtr::from_this(this)) };
-        // SAFETY: see impl-level note; `start_ref` keeps the writer alive
-        // across a synchronous completion inside `start_impl`.
+        // SAFETY: see impl-level note.
         unsafe { (*this.as_ptr()).start_impl() }
     }
 
