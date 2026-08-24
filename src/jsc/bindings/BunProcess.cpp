@@ -1464,9 +1464,9 @@ extern "C" int Bun__handleUnhandledRejection(JSC::JSGlobalObject* lexicalGlobalO
         if (listenerException) [[unlikely]] {
             auto* asyncContextData = globalObject->m_asyncContextData.get();
             JSC::JSValue saved = asyncContextData->getInternalField(0);
-            asyncContextData->putInternalField(JSC::getVM(globalObject), 0, JSC::jsUndefined());
+            asyncContextData->putInternalField(vm, 0, JSC::jsUndefined());
             Bun__reportUnhandledError(globalObject, JSC::JSValue::encode(JSC::JSValue(listenerException.get())));
-            asyncContextData->putInternalField(JSC::getVM(globalObject), 0, saved);
+            asyncContextData->putInternalField(vm, 0, saved);
         }
         return true;
     }
