@@ -459,7 +459,6 @@ fn install_with_progress(
             > 0
         {
             installer.manager.report_slow_lifecycle_scripts();
-            installer.manager.report_slow_lifecycle_scripts();
             PackageManager::sleep_until(&mut installer, |installer| {
                 installer.manager.has_no_more_pending_lifecycle_scripts()
             });

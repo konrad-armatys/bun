@@ -1267,7 +1267,6 @@ fn verbose_install() -> bool {
     PackageManager::verbose_install()
 }
 
-/// Thread-local cached folder-name buffer accessor.
 /// `&'static ZStr` from a NUL-terminated literal.
 #[inline]
 const fn z_static(bytes_with_nul: &'static [u8]) -> &'static ZStr {

@@ -830,9 +830,6 @@ impl PackageManager {
         result
     }
 
-    /// Run `f` with `self.log` moved out, for callees that take the manager
-    /// and its log as separate arguments. Anything logged to `self.log`
-    /// meanwhile is appended.
     /// Is `id` a direct dependency of the root (cwd workspace) package?
     pub(crate) fn is_root_dependency(&mut self, id: DependencyID) -> bool {
         // `RootPackageId::get` caches into `self`.

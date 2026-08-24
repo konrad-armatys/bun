@@ -91,8 +91,6 @@ impl PackageManifestMap {
         self.by_name_hash_allow_expired(ctx, scope, name, name_hash, None, needs_extended_manifest)
     }
 
-    /// `by_name_hash` without the disk fallback, so callers holding
-    /// `&mut PackageManager` can borrow only `pm.manifests`.
     /// A manifest already loaded into memory, without touching the disk cache.
     pub(crate) fn in_memory(
         &self,
