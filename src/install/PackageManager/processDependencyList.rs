@@ -297,8 +297,6 @@ impl PackageManager {
                     let package_json_source =
                         &bun_ast::Source::init_path_string(&json.path[..], &json.buf[..]);
                     initialize_store();
-                    // SAFETY: `self.log` is set once by `PackageManager::init()` and
-                    // never null while tasks run.
                     let log = &mut self.log;
                     let parsed = match json::ParsedJson::parse_package_json(
                         package_json_source,

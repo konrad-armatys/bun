@@ -71,9 +71,6 @@ pub fn install_with_manager(
         }
     }
 
-    // reshaped for borrowck — `loadFromCwd` needs `manager`, `manager.lockfile`,
-    // and `manager.log` simultaneously. Route through a single
-    // raw provenance root so the three reborrows share a tag.
     let load_result: lockfile::DetachedLoadResult = if manager.options.do_.load_lockfile() {
         manager.load_lockfile_from_cwd_detached::<true>()
     } else {

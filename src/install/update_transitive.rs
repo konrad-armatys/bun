@@ -720,7 +720,6 @@ pub(crate) fn warn_orphaned_patches(manager: &mut PackageManager) {
     }
     let keys: Vec<Box<[u8]>> = {
         let log = &mut manager.log;
-        // SAFETY: written once inside `PackageManager::init` on this thread; only read afterwards.
         let path: &[u8] = root_package_json_path().as_bytes();
         let opts = GetJsonOptions {
             init_reset_store: false,

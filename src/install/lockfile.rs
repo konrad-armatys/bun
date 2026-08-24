@@ -935,8 +935,6 @@ impl Lockfile {
         self.packages.items_dependencies()[0].contains(id)
     }
 
-    /// Is this a direct dependency of the workspace the install is taking place in?
-
     /// Is `id` a direct dependency of one of the `targets` workspaces?
     pub fn is_dependency_of_workspace_in(
         &self,
@@ -2132,8 +2130,6 @@ impl Lockfile {
         slicable.slice(self.buffers.string_bytes.as_slice())
     }
 
-    /// [`str`](Self::str) with the borrow detached from `self`.
-    ///
     /// Construct an empty Lockfile value in place.
     pub fn init_empty(&mut self) {
         *self = Self::init_empty_value();
