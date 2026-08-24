@@ -81,7 +81,7 @@ impl<'a> bun_io::Write for StreamType<'a> {
 }
 
 #[inline]
-fn write_array<T>(
+fn write_array<T: bytemuck::NoUninit>(
     stream: &mut StreamType<'_>,
     array: &[T],
     prefix: &'static str,
@@ -123,7 +123,7 @@ const _: () = {
 /// this invariant-free form instead and validate the flag before constructing
 /// the real `PatchedDep`.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct PatchedDepExternal {
     path: SemverString,
     _padding: [u8; 7],
@@ -501,22 +501,10 @@ pub(crate) fn load(
                     lockfile
                         .workspace_versions
                         .ensure_total_capacity(workspace_versions_list.len())?;
-                    // SAFETY: capacity reserved above; both columns are fully
-                    // overwritten by `copy_from_slice` before `re_index` reads them.
-                    unsafe {
-                        lockfile
-                            .workspace_versions
-                            .set_entries_len(workspace_versions_list.len());
-                    }
-                    lockfile
-                        .workspace_versions
-                        .keys_mut()
-                        .copy_from_slice(&workspace_package_name_hashes);
-                    lockfile
-                        .workspace_versions
-                        .values_mut()
-                        .copy_from_slice(&workspace_versions_list);
-                    lockfile.workspace_versions.re_index()?;
+                    lockfile.workspace_versions.set_from_slices(
+                        &workspace_package_name_hashes,
+                        &workspace_versions_list,
+                    )?;
                 }
 
                 {
@@ -530,23 +518,9 @@ pub(crate) fn load(
                     lockfile
                         .workspace_paths
                         .ensure_total_capacity(workspace_paths_strings.len())?;
-
-                    // SAFETY: capacity reserved above; both columns are fully
-                    // overwritten by `copy_from_slice` before `re_index` reads them.
-                    unsafe {
-                        lockfile
-                            .workspace_paths
-                            .set_entries_len(workspace_paths_strings.len());
-                    }
                     lockfile
                         .workspace_paths
-                        .keys_mut()
-                        .copy_from_slice(&workspace_paths_hashes);
-                    lockfile
-                        .workspace_paths
-                        .values_mut()
-                        .copy_from_slice(&workspace_paths_strings);
-                    lockfile.workspace_paths.re_index()?;
+                        .set_from_slices(&workspace_paths_hashes, &workspace_paths_strings)?;
                 }
             } else {
                 stream.pos -= 8;

@@ -1076,6 +1076,28 @@ pub fn parse<'a, 'b>(
     )
 }
 
+/// [`parse`] for callers that hold only the npm-alias registry (e.g. a
+/// split-borrowed `PackageManager`).
+pub fn parse_with_alias_registry<'a>(
+    alias: String,
+    alias_hash: Option<PackageNameHash>,
+    dependency: &[u8],
+    sliced: &SlicedString,
+    log: Option<&'a mut bun_ast::Log>,
+    registry: Option<&mut dyn NpmAliasRegistry>,
+) -> Option<Version> {
+    let dep = strings::trim_left(dependency, b" \t\n\r");
+    parse_with_tag(
+        alias,
+        alias_hash,
+        dep,
+        Tag::infer(dep),
+        sliced,
+        log,
+        registry,
+    )
+}
+
 pub(crate) fn parse_with_optional_tag<'a, 'b>(
     alias: String,
     alias_hash: impl Into<Option<PackageNameHash>>,

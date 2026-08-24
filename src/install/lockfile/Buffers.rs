@@ -9,7 +9,7 @@ use bun_core::strings;
 // parent-module alias is spelled via its crate path instead.
 use super::{
     DependencyIDList, DependencyList, ExternalStringBuffer, Lockfile, PackageIDList, Stream,
-    StringBuffer, Tree, assert_no_uninitialized_padding, tree,
+    StringBuffer, Tree, tree,
 };
 use crate::lockfile_real as lockfile;
 use crate::package_manager_real::package_manager_options::Options as PackageManagerOptions;
@@ -80,7 +80,11 @@ mod sizes {
     const _: () = assert!(ALIGN_TYPE_0 == align_of::<&[Tree]>());
 }
 
-pub(crate) fn read_array<T: Copy>(stream: &mut Stream) -> crate::Result<Vec<T>> {
+/// `T: CheckedBitPattern`: every element read from the (untrusted) lockfile is
+/// validated; for plain-data `T` that check is free.
+pub(crate) fn read_array<T: bytemuck::CheckedBitPattern>(
+    stream: &mut Stream,
+) -> crate::Result<Vec<T>> {
     let start_pos = stream.read_int_le::<u64>()?;
 
     // If its 0xDEADBEEF, then that means the value was never written in the lockfile.
@@ -139,19 +143,24 @@ pub(crate) fn read_array<T: Copy>(stream: &mut Stream) -> crate::Result<Vec<T>> 
 
     let start_pos = start_pos as usize;
     let end_pos = end_pos as usize;
-    // SAFETY: `start_pos..end_pos` is in-bounds (checked above) and the lockfile
-    // writer aligned the payload to `align_of::<T>()` via `Aligner::write`.
-    let misaligned: &[T] = unsafe {
-        bun_core::ffi::slice(
-            stream.buffer.as_ptr().add(start_pos).cast::<T>(),
-            (end_pos - start_pos) / size_of::<T>(),
-        )
-    };
-
-    Ok(misaligned.to_vec())
+    read_elements(&stream.buffer[start_pos..end_pos]).ok_or(crate::Error::CorruptLockfile)
 }
 
-pub(crate) fn write_array<S, T>(
+/// `bytes` as a `Vec<T>`, every element validated (free for plain-data `T`);
+/// `None` if one is not a valid `T`. One copy when `bytes` is aligned for `T`.
+pub(crate) fn read_elements<T: bytemuck::CheckedBitPattern>(bytes: &[u8]) -> Option<Vec<T>> {
+    use bytemuck::checked::{CheckedCastError, try_cast_slice, try_pod_read_unaligned};
+    match try_cast_slice::<u8, T>(bytes) {
+        Ok(elements) => Some(elements.to_vec()),
+        Err(CheckedCastError::InvalidBitPattern) => None,
+        Err(_) => bytes
+            .chunks_exact(size_of::<T>())
+            .map(|raw| try_pod_read_unaligned(raw).ok())
+            .collect(),
+    }
+}
+
+pub(crate) fn write_array<S, T: bytemuck::NoUninit>(
     stream: &mut S,
     array: &[T],
     prefix: &'static str,
@@ -162,17 +171,9 @@ where
     // `bun_io::Write` (append) — so there are never two `&mut` to one buffer.
     S: lockfile::PositionalStream + bun_io::Write,
 {
-    // This call is a zero-cost intent marker only — it carries no trait bound (see the
-    // doc comment on `assert_no_uninitialized_padding`). The actual compile-time
-    // enforcement is the per-type `const` field-offset asserts and the
-    // `layout_asserts` size/align pins in src/install/padding_checker.rs; any new
-    // `T` serialized through here must be added to that audit.
-    assert_no_uninitialized_padding(array);
-
-    // SAFETY: `T` has no uninitialized padding (audited via the per-type layout
-    // asserts in padding_checker.rs); reading its bytes is sound.
-    let bytes: &[u8] =
-        unsafe { bun_core::ffi::slice(array.as_ptr().cast::<u8>(), core::mem::size_of_val(array)) };
+    // `T: NoUninit` — and the per-type layout pins in padding_checker.rs keep
+    // the on-disk format stable.
+    let bytes: &[u8] = bytemuck::cast_slice(array);
 
     let start_pos = stream.get_pos()?;
     stream.write_int_le::<u64>(0xDEAD_BEEF)?;
@@ -192,8 +193,6 @@ where
         stream.write_all(bytes)?;
         let real_end_pos = stream.get_pos()? as u64;
         let positioned: [u64; 2] = [real_start_pos, real_end_pos];
-        // `[u64; 2]` and `[u8; 16]` are both `Pod` of equal size — `bytemuck`
-        // gives the byte view without `unsafe`.
         let positioned_bytes: &[u8; 16] = bytemuck::cast_ref(&positioned);
         let mut written: usize = 0;
         while written < 16 {
@@ -202,8 +201,6 @@ where
     } else {
         let real_end_pos = stream.get_pos()? as u64;
         let positioned: [u64; 2] = [real_end_pos, real_end_pos];
-        // `[u64; 2]` and `[u8; 16]` are both `Pod` of equal size — `bytemuck`
-        // gives the byte view without `unsafe`.
         let positioned_bytes: &[u8; 16] = bytemuck::cast_ref(&positioned);
         let mut written: usize = 0;
         while written < 16 {

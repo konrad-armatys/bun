@@ -24,7 +24,7 @@ use crate::{
 // id|dep_id|parent|off|len). Under `repr(Rust)` rustc may reorder fields and
 // the binary lockfile round-trip silently corrupts `dependencies`.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Tree {
     pub(crate) id: Id,
 
@@ -71,19 +71,10 @@ pub(crate) const MAX_DEPTH: usize = (MAX_PATH_BYTES / b"node_modules".len()) + 1
 
 pub(crate) type DepthBuf = [Id; MAX_DEPTH];
 
-/// Write-only scratch buffer
-/// for [`relative_path_and_depth`]. Every slot is written before it is read
-/// (index 0 unconditionally, indices `1..depth_buf_len` in the parent-walk
-/// loop), so leaving the ~1.4 KB array uninitialised is sound and
-/// avoids a `memset` per tree in the `--frozen-lockfile` no-change path.
-/// Same shape/contract as [`bun_core::PathBuffer::uninit`].
+/// Scratch for [`relative_path_and_depth`]; one per iterator, not per tree.
 #[inline]
-#[allow(invalid_value, clippy::uninit_assumed_init)]
 pub(crate) fn depth_buf_uninit() -> DepthBuf {
-    // SAFETY: `DepthBuf` is `[u32; N]`; every bit pattern is a valid `u32`.
-    // Callers treat this as a write-only scratch buffer — no element is read
-    // before being assigned by `relative_path_and_depth`.
-    unsafe { core::mem::MaybeUninit::uninit().assume_init() }
+    [0; MAX_DEPTH]
 }
 
 impl Tree {
@@ -295,6 +286,85 @@ impl<'a, const PATH_STYLE: IteratorPathStyle> Iterator<'a, PATH_STYLE> {
     }
 }
 
+/// [`Iterator`] state without the borrowed buffers: the lockfile is passed to
+/// each [`next`](Self::next) call, so it may change (grow) between calls.
+pub struct Cursor<const PATH_STYLE: IteratorPathStyle> {
+    pub(crate) tree_id: Id,
+    pub(crate) path_buf: PathBuffer,
+    pub(crate) depth_stack: DepthBuf,
+}
+
+/// What [`Cursor::next`] found; `relative_path` borrows the cursor,
+/// `dependencies` the lockfile.
+pub struct CursorNext<'c, 'l> {
+    pub relative_path: &'c ZStr,
+    pub dependencies: &'l [DependencyID],
+    pub tree_id: Id,
+    pub depth: usize,
+}
+
+impl<const PATH_STYLE: IteratorPathStyle> Cursor<PATH_STYLE> {
+    pub fn new() -> Self {
+        let mut cursor = Self {
+            tree_id: 0,
+            path_buf: PathBuffer::uninit(),
+            depth_stack: depth_buf_uninit(),
+        };
+        if PATH_STYLE == IteratorPathStyle::NodeModules {
+            cursor.path_buf[0..b"node_modules".len()].copy_from_slice(b"node_modules");
+        }
+        cursor
+    }
+
+    pub fn next<'c, 'l>(
+        &'c mut self,
+        lockfile: &'l Lockfile,
+        mut completed_trees: Option<&mut DynamicBitSet>,
+    ) -> Option<CursorNext<'c, 'l>> {
+        let trees = lockfile.buffers.trees.as_slice();
+
+        if (self.tree_id as usize) >= trees.len() {
+            return None;
+        }
+
+        while trees[self.tree_id as usize].dependencies.len == 0 {
+            if PATH_STYLE == IteratorPathStyle::NodeModules {
+                if let Some(ct) = completed_trees.as_deref_mut() {
+                    ct.set(self.tree_id as usize);
+                }
+            }
+            self.tree_id += 1;
+            if (self.tree_id as usize) >= trees.len() {
+                return None;
+            }
+        }
+
+        let current_tree_id = self.tree_id;
+        let tree = trees[current_tree_id as usize];
+        let tree_dependencies = tree
+            .dependencies
+            .get(lockfile.buffers.hoisted_dependencies.as_slice());
+
+        let (relative_path, depth) = relative_path_and_depth::<PATH_STYLE>(
+            trees,
+            lockfile.buffers.dependencies.as_slice(),
+            lockfile.buffers.string_bytes.as_slice(),
+            current_tree_id,
+            &mut self.path_buf,
+            &mut self.depth_stack,
+        );
+
+        self.tree_id += 1;
+
+        Some(CursorNext {
+            relative_path,
+            dependencies: tree_dependencies,
+            tree_id: current_tree_id,
+            depth,
+        })
+    }
+}
+
 /// Tree folder names are joined into install destinations as
 /// `node_modules/<name>/...`; this path and the tree builder must agree on the
 /// same validator.
@@ -444,7 +514,7 @@ pub struct Builder<'a, const METHOD: BuilderMethod> {
         ArrayHashMap<PackageNameHash, ArrayHashMap<DependencyID, ()>>,
     /// An optional peer got bound after its dependent was placed; see `Lockfile::resolve`.
     pub(crate) late_bound_optional_peer: bool,
-    pub(crate) manager: Option<&'a PackageManager>,
+    pub(crate) manager: Option<HoistOptions<'a>>,
     pub(crate) sort_buf: Vec<DependencyID>,
     pub(crate) workspace_filters: &'a [WorkspaceFilter],
     pub(crate) install_root_dependencies: bool,
@@ -455,13 +525,53 @@ pub struct Builder<'a, const METHOD: BuilderMethod> {
 
 pub struct BuilderEntry {
     pub tree: Tree,
-    pub dependencies: DependencyIDList,
+    pub dependencies: PlacedList,
+}
+
+/// A dependency placed in a tree, with its name hash alongside so the hoist
+/// scan (`hoist_dependency`) compares names without touching `Dependency`.
+#[derive(Clone, Copy)]
+pub struct Placed {
+    pub id: DependencyID,
+    pub name_hash: PackageNameHash,
+}
+pub type PlacedList = Vec<Placed>;
+
+/// What the `Filter` hoist reads from the package manager.
+#[derive(Clone, Copy)]
+pub struct HoistOptions<'a> {
+    pub cpu: crate::npm::Architecture,
+    pub os: crate::npm::OperatingSystem,
+    pub log_level: crate::LogLevel,
+    pub local_package_features: crate::Features,
+    pub remote_package_features: crate::Features,
+    pub pruned_workspaces: &'a [PackageNameHash],
+}
+
+impl<'a> HoistOptions<'a> {
+    pub fn new(
+        options: &crate::package_manager_real::Options,
+        summary: &'a crate::lockfile::package::DiffSummary,
+    ) -> HoistOptions<'a> {
+        HoistOptions {
+            cpu: options.cpu,
+            os: options.os,
+            log_level: options.log_level,
+            local_package_features: options.local_package_features,
+            remote_package_features: options.remote_package_features,
+            pruned_workspaces: &summary.pruned_workspaces,
+        }
+    }
+
+    pub fn from_manager(manager: &'a PackageManager) -> HoistOptions<'a> {
+        Self::new(&manager.options, &manager.summary)
+    }
 }
 
 bun_collections::multi_array_columns! {
     pub(crate) trait BuilderEntryColumns for BuilderEntry {
         tree: Tree,
-        dependencies: DependencyIDList,
+        dependencies: PlacedList,
     }
 }
 
@@ -501,7 +611,7 @@ impl<'a, const METHOD: BuilderMethod> Builder<'a, METHOD> {
 
         let mut slice = self.list.to_owned_slice();
         let mut trees: Vec<Tree> = slice.items_tree().to_vec();
-        let dependencies: &mut [DependencyIDList] = slice.items_dependencies_mut();
+        let dependencies: &mut [PlacedList] = slice.items_dependencies_mut();
 
         for tree in &trees {
             total += tree.dependencies.len;
@@ -517,7 +627,7 @@ impl<'a, const METHOD: BuilderMethod> Builder<'a, METHOD> {
             // `tree.dependencies.len: u32`), so `len()` is provably < 2^32.
             // Avoid the `try_from` panic-format path on this per-tree hot loop.
             let off: u32 = dep_ids.len() as u32;
-            for &dep_id in child.iter() {
+            for &Placed { id: dep_id, .. } in child.iter() {
                 let pkg_id = self.resolutions[dep_id as usize];
                 if pkg_id == invalid_package_id {
                     // optional peers that never resolved
@@ -553,7 +663,7 @@ pub(crate) fn is_filtered_dependency_or_workspace(
     parent_pkg_id: PackageID,
     workspace_filters: &[WorkspaceFilter],
     install_root_dependencies: bool,
-    manager: &PackageManager,
+    manager: HoistOptions<'_>,
     lockfile: &Lockfile,
     resolutions: &[PackageID],
 ) -> bool {
@@ -574,21 +684,21 @@ pub(crate) fn is_filtered_dependency_or_workspace(
     let dep = &lockfile.buffers.dependencies.as_slice()[dep_id as usize];
     let parent_res = &pkg_resolutions[parent_pkg_id as usize];
 
-    if pkg_metas[pkg_id as usize].is_disabled(manager.options.cpu, manager.options.os) {
-        if manager.options.log_level.is_verbose() {
+    if pkg_metas[pkg_id as usize].is_disabled(manager.cpu, manager.os) {
+        if manager.log_level.is_verbose() {
             let meta = &pkg_metas[pkg_id as usize];
             let name = lockfile.str(&pkg_names[pkg_id as usize]);
-            if !meta.os.is_match(manager.options.os) && !meta.arch.is_match(manager.options.cpu) {
+            if !meta.os.is_match(manager.os) && !meta.arch.is_match(manager.cpu) {
                 bun_core::pretty_errorln!(
                     "<d>Skip installing<r> <b>{}<r> <d>- cpu & os mismatch<r>",
                     bstr::BStr::new(name)
                 );
-            } else if !meta.os.is_match(manager.options.os) {
+            } else if !meta.os.is_match(manager.os) {
                 bun_core::pretty_errorln!(
                     "<d>Skip installing<r> <b>{}<r> <d>- os mismatch<r>",
                     bstr::BStr::new(name)
                 );
-            } else if !meta.arch.is_match(manager.options.cpu) {
+            } else if !meta.arch.is_match(manager.cpu) {
                 bun_core::pretty_errorln!(
                     "<d>Skip installing<r> <b>{}<r> <d>- cpu mismatch<r>",
                     bstr::BStr::new(name)
@@ -605,8 +715,8 @@ pub(crate) fn is_filtered_dependency_or_workspace(
     let dep_features = match parent_res.tag {
         crate::resolution::Tag::Root
         | crate::resolution::Tag::Workspace
-        | crate::resolution::Tag::Folder => manager.options.local_package_features,
-        _ => manager.options.remote_package_features,
+        | crate::resolution::Tag::Folder => manager.local_package_features,
+        _ => manager.remote_package_features,
     };
 
     if !dep.behavior.is_enabled(dep_features) {
@@ -621,7 +731,7 @@ pub(crate) fn is_filtered_dependency_or_workspace(
         return !install_root_dependencies;
     }
 
-    if manager.summary.pruned_workspaces.contains(&dep.name_hash) {
+    if manager.pruned_workspaces.contains(&dep.name_hash) {
         return true;
     }
 
@@ -656,7 +766,7 @@ impl Tree {
                 dependency_id,
                 dependencies: DependencyIDSlice::default(),
             },
-            dependencies: DependencyIDList::default(),
+            dependencies: PlacedList::default(),
         })?;
 
         // reshaped for borrowck.
@@ -754,7 +864,7 @@ impl Tree {
             let dependency = &dependencies[dep_id as usize];
 
             // An empty alias has no `node_modules/<name>` folder to escape, so
-            // don't treat it as unsafe — match the lockfile parser and isolated
+            // don't treat it as untrusted — match the lockfile parser and isolated
             // installer (`bun.lock.rs`, `isolated_install.rs`) which guard
             // `!name.is_empty()` here rather than failing the whole install.
             let dependency_name = dependency
@@ -880,9 +990,9 @@ impl Tree {
                     {
                         let mut list_slice = builder.list.slice();
                         let dependency_lists = list_slice.items_dependencies_mut();
-                        for placed_dep_id in dependency_lists[replace.id as usize].iter_mut() {
-                            if *placed_dep_id == replace.dep_id {
-                                *placed_dep_id = dep_id;
+                        for placed in dependency_lists[replace.id as usize].iter_mut() {
+                            if placed.id == replace.dep_id {
+                                placed.id = dep_id;
                             }
                         }
                     }
@@ -917,7 +1027,10 @@ impl Tree {
                     {
                         // Go through ListExt
                         // accessors sequentially so the &mut borrows do not overlap.
-                        builder.list.items_dependencies_mut()[dest.id as usize].push(dep_id);
+                        builder.list.items_dependencies_mut()[dest.id as usize].push(Placed {
+                            id: dep_id,
+                            name_hash: dependency.name_hash,
+                        });
                         builder.list.items_tree_mut()[dest.id as usize]
                             .dependencies
                             .len += 1;
@@ -972,18 +1085,18 @@ impl Tree {
         // Tree is Copy — snapshot the fields we need so we don't hold a borrow of builder.list.
         let this: Tree = builder.list.items_tree()[self_id as usize];
         // The loop body only reads through `builder`; the recursive call comes after the loop.
-        let this_deps: &[DependencyID] = this
-            .dependencies
-            .get(builder.list.items_dependencies()[self_id as usize].as_slice());
-        // Keep the comparand in a register; `deps.get_unchecked` may alias `dependency`.
+        let this_deps: &[Placed] = &builder.list.items_dependencies()[self_id as usize];
+        debug_assert_eq!(this_deps.len(), this.dependencies.len as usize);
         let target_name_hash = dependency.name_hash;
-        for &dep_id in this_deps {
-            // SAFETY: `dep_id` was produced by the same lockfile that produced `deps`,
-            // so it is always in bounds.
-            let dep = unsafe { deps.get_unchecked(dep_id as usize) };
-            if dep.name_hash != target_name_hash {
+        for &Placed {
+            id: dep_id,
+            name_hash,
+        } in this_deps
+        {
+            if name_hash != target_name_hash {
                 continue;
             }
+            let dep = &deps[dep_id as usize];
 
             let res_id = builder.resolutions[dep_id as usize];
 

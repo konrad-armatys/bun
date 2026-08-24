@@ -44,7 +44,7 @@ pub fn assign_root_resolution(
 
 impl PackageManager {
     pub(crate) fn format_later_version_in_cache(
-        &mut self,
+        &self,
         package_name: &[u8],
         name_hash: PackageNameHash,
         resolution: &Resolution,
@@ -64,9 +64,7 @@ impl PackageManager {
                 // nothing on `PackageManager` besides the map, so use the
                 // disjoint-borrow helper and read `self.options` / `self.lockfile`
                 // alongside the held `&mut self.manifests` field borrow.
-                let manifest = self
-                    .manifests
-                    .by_name_hash_in_memory(package_name, name_hash)?;
+                let manifest = self.manifests.in_memory(package_name, name_hash)?;
 
                 if let Some(latest_version) = manifest
                     .find_by_dist_tag_with_filter(

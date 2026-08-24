@@ -43,8 +43,8 @@ use super::override_map::ScopedOverride;
 use super::override_selector::{PackageSelector, parse_package_segment};
 use super::package::{Meta, PackageColumns as _, value_loc_of};
 use super::{
-    CatalogMap, DependencySlice, LoadResult, Lockfile as BinaryLockfile, OverrideMap, Package,
-    PackageIndexMap, PatchedDep, TrustedDependenciesSet, VersionHashMap, tree,
+    CatalogMap, DependencySlice, Lockfile as BinaryLockfile, OverrideMap, Package, PackageIndexMap,
+    PatchedDep, TrustedDependenciesSet, VersionHashMap, tree,
 };
 
 use bun_io::AsFmt;
@@ -210,7 +210,7 @@ impl Stringifier {
     /// A walk-clean lockfile with scoped rules is stamped v3 whatever version was
     /// loaded. Without scoped rules a lockfile keeps its loaded v1/v2, and a fresh
     /// or v3-loaded one is walked down to v2, or to v1 on a v2-invariant violation
-    /// (off-registry npm tarball without a supported integrity, unsafe git
+    /// (off-registry npm tarball without a supported integrity, unvalidated git
     /// `.bun-tag`); that decision must not depend on the writer's `~/.npmrc`.
     ///
     /// Walks the package tree the same way the writer does — only packages that
@@ -274,10 +274,10 @@ impl Stringifier {
                         }
                     }
                     ResolutionTag::Git => {
-                        // An unsafe git `.bun-tag` is only rejected at v2, so
+                        // An unvalidated git `.bun-tag` is only rejected at v2, so
                         // staying at v1 keeps it loading. (A `github` tag is
                         // rejected at every version, so no lockfile version can
-                        // round-trip an unsafe one — nothing to gate here.)
+                        // round-trip an unvalidated one — nothing to gate here.)
                         if !crate::repository::is_safe_resolved_tag(
                             res.repository().resolved.slice(buf),
                         ) {
@@ -293,7 +293,7 @@ impl Stringifier {
 
     pub(crate) fn save_from_binary(
         lockfile: &mut BinaryLockfile,
-        load_result: &LoadResult,
+        load_result: &dyn crate::lockfile::LoadedFrom,
         options: &PackageManagerOptions,
         writer: &mut Writer,
     ) -> Result<(), WriteError> {
@@ -3007,7 +3007,7 @@ pub(crate) fn parse_into_binary_lockfile(
                         return Err(ParseError::InvalidPackageInfo);
                     };
 
-                    // Reject an unsafe `.bun-tag`. For `git`, `Repository::checkout`
+                    // Reject an unvalidated `.bun-tag`. For `git`, `Repository::checkout`
                     // re-validates with the same guard before building any cache
                     // path or invoking `git`, so this parse-time check is gated to
                     // v2+ — older git lockfiles keep loading without reopening the
@@ -3085,7 +3085,7 @@ pub(crate) fn parse_into_binary_lockfile(
 
         // The two `[0]` writes are done first via
         // sequential `&mut` accessors so the loops can take all column views
-        // immutably without overlapping exclusive borrows or `unsafe`.
+        // immutably without overlapping exclusive borrows.
         lockfile.packages.items_resolution_mut()[0] =
             Resolution::init(crate::resolution::TaggedValue::Root);
         lockfile.packages.items_meta_mut()[0].origin = Origin::Local;

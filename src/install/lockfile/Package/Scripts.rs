@@ -20,7 +20,7 @@ bun_output::declare_scope!(Lockfile, hidden);
 const SCRIPT_NAMES_LEN: usize = LockfileScripts::NAMES.len();
 
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, bytemuck::NoUninit, bytemuck::CheckedBitPattern)]
 pub struct Scripts {
     pub(crate) preinstall: SemverString,
     pub(crate) install: SemverString,
@@ -289,6 +289,7 @@ impl Scripts {
 
     pub fn get_list(
         &mut self,
+        options: &crate::package_manager_real::Options,
         log: &mut bun_ast::Log,
         lockfile: &Lockfile,
         folder_path: &mut bun_paths::AutoAbsPath,
@@ -297,7 +298,7 @@ impl Scripts {
     ) -> Result<Option<List>, crate::Error> {
         if self.has_any() {
             let add_node_gyp_rebuild_script =
-                if lockfile.has_trusted_dependency(folder_name, folder_name, resolution)
+                if lockfile.has_trusted_dependency(options, folder_name, folder_name, resolution)
                     && self.install.is_empty()
                     && self.preinstall.is_empty()
                 {

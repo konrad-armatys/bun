@@ -98,10 +98,7 @@ impl Drop for Store {
     fn drop(&mut self) {
         use entry::EntryColumns as _;
         for slot in self.entries.items_scripts() {
-            if let Some(list) = slot.take() {
-                // SAFETY: the installer returned only after every task finished, so nothing else references the list boxed in Installer's RunPreinstall step.
-                unsafe { bun_core::heap::destroy(list) };
-            }
+            drop(slot.take());
         }
         self.entries.drop_elements();
         self.nodes.drop_elements();
@@ -300,11 +297,10 @@ pub mod entry {
         // its own `entry_id`; see Installer.rs). Without interior
         // mutability the only access path is `&Store → &[Option<_>]` and the
         // per-entry write would mutate through shared-reference provenance.
-        // Raw `*mut` instead of `Box` so reads don't move out of the cell.
-        // `Cell` (not `UnsafeCell`): payload is `Copy`, so `.get()/.set()` are
-        // zero-unsafe; `Cell` and `UnsafeCell` have identical `Send`/`!Sync`
-        // auto-traits, so the per-entry single-writer discipline is unchanged.
-        pub scripts: core::cell::Cell<Option<*mut package::scripts::List>>,
+        // Reads `take()` the box and `set()` it back; each entry's slot has a
+        // single owner at a time (its task, or the main thread while that task
+        // is parked), so the slot is never observed empty by anyone else.
+        pub scripts: core::cell::Cell<Option<Box<package::scripts::List>>>,
     }
 
     bun_collections::multi_array_columns! {
@@ -316,7 +312,7 @@ pub mod entry {
             hoisted: bool,
             peer_hash: PeerHash,
             entry_hash: u64,
-            scripts: core::cell::Cell<Option<*mut package::scripts::List>>,
+            scripts: core::cell::Cell<Option<Box<package::scripts::List>>>,
         }
     }
 

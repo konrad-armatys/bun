@@ -1,6 +1,3 @@
-#[cfg(windows)]
-use core::ptr;
-
 use bun_alloc::AllocError;
 #[cfg(not(windows))]
 use bun_core::{Global, fmt as bun_fmt};
@@ -120,15 +117,10 @@ impl FileCopier {
 
                 let result: sys::Result<()> = match entry.kind {
                     EntryKind::Directory => {
-                        // SAFETY: FFI — both `slice_z()` are NUL-terminated WStrs.
-                        if unsafe {
-                            bun_sys::windows::CreateDirectoryExW(
-                                self.src_path.slice_z().as_ptr(),
-                                self.dest_subpath.slice_z().as_ptr(),
-                                ptr::null_mut(),
-                            )
-                        } == 0
-                        {
+                        if !bun_sys::windows::create_directory_ex_w(
+                            self.src_path.slice_z(),
+                            self.dest_subpath.slice_z(),
+                        ) {
                             let _ = bun_sys::make_path::make_path::<u16>(
                                 &dest_dir,
                                 entry.path.as_slice(),
@@ -224,10 +216,7 @@ impl FileCopier {
                         sys::Result::Ok(s) => s,
                         sys::Result::Err(_) => continue,
                     };
-                    // SAFETY: fchmod is safe to call with any fd + mode; errors are ignored (`_ =`).
-                    unsafe {
-                        let _ = bun_sys::c::fchmod(dest.handle().native(), stat.st_mode);
-                    }
+                    let _ = bun_sys::fchmod(dest.handle(), stat.st_mode as bun_sys::Mode);
                 }
 
                 match bun_sys::copy_file::copy_file_with_state(

@@ -412,7 +412,7 @@ where
                 BinTag::NamedFile => {
                     w.begin_object()?;
 
-                    let named_file = *pkg.bin.named_file();
+                    let named_file = pkg.bin.named_file();
                     w.object_field(b"name")?;
                     w.write(named_file[0].slice(sb))?;
 

@@ -65,8 +65,7 @@ pub fn do_patch_commit(
 ) -> Result<Option<PatchCommitResult>, crate::Error> {
     let mut folder_path_buf = PathBuffer::uninit();
     let mut lockfile: Box<Lockfile> = Box::default();
-    let log = manager.log_mut();
-    match lockfile.load_from_cwd::<true>(Some(manager), log) {
+    match manager.with_log(|manager, log| lockfile.load_from_cwd::<true>(Some(manager), log)) {
         lockfile::LoadResult::NotFound => {
             Output::err_generic(
                 "Cannot find lockfile. Install packages with `<cyan>bun install<r>` before patching them.",
@@ -177,7 +176,7 @@ pub fn do_patch_commit(
                 };
 
             initialize_store();
-            let log = manager.log_mut();
+            let log = &mut manager.log;
             let parsed = match JSON::ParsedJson::parse_package_json(&package_json_source, log) {
                 Ok(p) => p,
                 Err(err) => {
@@ -208,16 +207,17 @@ pub fn do_patch_commit(
 
             let mut resolver: () = ();
             let mut package = Package::default();
-            let log = manager.log_mut();
-            package.parse_with_json::<()>(
-                &mut lockfile,
-                manager,
-                log,
-                &package_json_source,
-                json,
-                &mut resolver,
-                Features::FOLDER,
-            )?;
+            manager.with_log(|manager, log| {
+                package.parse_with_json::<()>(
+                    &mut lockfile,
+                    manager,
+                    log,
+                    &package_json_source,
+                    json,
+                    &mut resolver,
+                    Features::FOLDER,
+                )
+            })?;
 
             let actual_package = match lockfile.package_index.get(&package.name_hash) {
                 None => {
@@ -751,7 +751,7 @@ pub fn prepare_patch(manager: &mut PackageManager) -> Result<(), crate::Error> {
                     };
 
                 initialize_store();
-                let log = manager.log_mut();
+                let log = &mut manager.log;
                 let parsed = match JSON::ParsedJson::parse_package_json(&package_json_source, log) {
                     Ok(p) => p,
                     Err(err) => {
@@ -782,25 +782,17 @@ pub fn prepare_patch(manager: &mut PackageManager) -> Result<(), crate::Error> {
 
                 let mut resolver: () = ();
                 let mut package = Package::default();
-                let log = manager.log_mut();
-                // borrowck — `parse_with_json` needs `&mut Lockfile` and
-                // `&mut PackageManager` simultaneously, but the lockfile here is
-                // `manager.lockfile`. Temporarily move the Box out so the two
-                // borrows are disjoint; `parse_with_json` never reads `pm.lockfile`
-                // (it takes the lockfile as its own parameter). Restore before
-                // propagating any error so `manager` is never left half-torn.
-                let mut lockfile: Box<Lockfile> = core::mem::take(&mut manager.lockfile);
-                let parse_result = package.parse_with_json::<()>(
-                    &mut lockfile,
-                    manager,
-                    log,
-                    &package_json_source,
-                    json,
-                    &mut resolver,
-                    Features::FOLDER,
-                );
-                manager.lockfile = lockfile;
-                parse_result?;
+                manager.with_lockfile_and_log(|lockfile, manager, log| {
+                    package.parse_with_json::<()>(
+                        lockfile,
+                        manager,
+                        log,
+                        &package_json_source,
+                        json,
+                        &mut resolver,
+                        Features::FOLDER,
+                    )
+                })?;
                 let lockfile: &Lockfile = &manager.lockfile;
                 let strbuf = lockfile.buffers.string_bytes.as_slice();
 

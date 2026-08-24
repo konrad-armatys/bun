@@ -57,7 +57,6 @@ pub(crate) mod bun_bunfig {
     pub(crate) use bun_options_types::context as Arguments;
 }
 
-use core::cell::Cell;
 use core::fmt;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -395,7 +394,6 @@ pub struct RunCommand;
 pub static PRETEND_TO_BE_NODE: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
 
-#[cfg(not(windows))]
 use bun_core::ZStr;
 
 impl RunCommand {
@@ -496,7 +494,7 @@ impl RunCommand {
     #[cold]
     pub fn create_fake_temporary_node_executable(
         path: &mut Vec<u8>,
-        optional_bun_path: &mut &[u8],
+        optional_bun_path: &mut &'static ZStr,
     ) -> Result<(), crate::Error> {
         // If we are already running as "node", the path should exist
         if PRETEND_TO_BE_NODE.load(core::sync::atomic::Ordering::Relaxed) {
@@ -523,9 +521,7 @@ impl RunCommand {
             let argv0_z: &ZStr = if !optional_bun_path.is_empty() {
                 // When the caller pre-supplied a path, that path is the symlink
                 // target.
-                // SAFETY: callers pass a slice borrowed from a `ZStr` (argv[0] /
-                // self_exe_path / static literal), so `ptr[len] == 0` holds.
-                unsafe { ZStr::from_raw(optional_bun_path.as_ptr(), optional_bun_path.len()) }
+                *optional_bun_path
             } else {
                 // Ask the OS for the real absolute path first. Fall back to an
                 // absolute `argv[0]` only if that fails — never trust a bare
@@ -533,7 +529,7 @@ impl RunCommand {
                 // inner process's `argv[0]` IS `<BUN_NODE_DIR>/bun`.
                 match bun_core::self_exe_path() {
                     Ok(self_path) if !self_path.as_bytes().is_empty() => {
-                        *optional_bun_path = self_path.as_bytes();
+                        *optional_bun_path = self_path;
                         self_path
                     }
                     result => {
@@ -547,7 +543,7 @@ impl RunCommand {
                             return Ok(());
                         }
                         if argv0_bytes.first() == Some(&b'/') {
-                            *optional_bun_path = argv0_bytes;
+                            *optional_bun_path = argv0;
                             argv0
                         } else {
                             // No usable target — propagate the OS error when we
@@ -649,15 +645,8 @@ impl RunCommand {
             let mut target_path_buffer = bun_paths::WPathBuffer::default();
             let prefix: &[u16] = strings::w!("\\??\\");
 
-            // SAFETY: GetTempPathW writes at most `nBufferLength` WCHARs (incl.
-            // trailing NUL) into the offset slice; we reserve `prefix.len()` at
-            // the front for the NT object prefix.
-            let len = unsafe {
-                win::GetTempPathW(
-                    (target_path_buffer.len() - prefix.len()) as u32,
-                    target_path_buffer.as_mut_ptr().add(prefix.len()),
-                )
-            } as usize;
+            // `prefix.len()` is reserved at the front for the NT object prefix.
+            let len = win::get_temp_path_w(&mut target_path_buffer[prefix.len()..]);
             if len == 0 {
                 // Non-fatal; fall through and leave
                 // PATH unmodified. (No `RUN` scope is declared in this crate.)
@@ -754,63 +743,13 @@ impl RunCommand {
     }
 }
 
-/// Process-lifetime arena for the install-tier `Transpiler` constructed in
-/// `RunCommand::configure_env_for_run`. Mirrors `runner_arena()` in
-/// `runtime/cli/run_command.rs` — `bun_alloc::Arena` is `!Sync`, so guard a
-/// a raw `MaybeUninit` global with `Once` (PORTING.md §Forbidden bars
-/// `Box::leak`).
-fn install_runner_arena() -> &'static bun_alloc::Arena {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    // PORTING.md §Global mutable state: `Once`-guarded init; RacyCell because
-    // `Bump` is `!Sync` so `OnceLock<Arena>` can't be used.
-    static ARENA: bun_core::RacyCell<::core::mem::MaybeUninit<bun_alloc::Arena>> =
-        bun_core::RacyCell::new(::core::mem::MaybeUninit::uninit());
-    ONCE.call_once(|| {
-        // SAFETY: one-time init under `Once`; no concurrent writer.
-        unsafe { (*ARENA.get()).write(bun_alloc::Arena::new()) };
-    });
-    // SAFETY: initialized exactly once above. `configure_env_for_run` is only
-    // ever called from the single CLI dispatch thread, so the `!Sync` Bump is
-    // never observed concurrently.
-    unsafe { (*ARENA.get()).assume_init_ref() }
-}
-
 impl RunCommand {
-    /// DEP-CYCLE NOTE: the full implementation walks `bun_resolver::DirInfo`
-    /// and reads `package.json` via the resolver — T6 work that lives in
-    /// `bun_runtime::cli::RunCommand::configure_env_for_run`. The install
-    /// tier needs the *Transpiler-initialisation* half of that contract
-    /// because callers (`configure_env_for_scripts_run`) `assume_init()` the
-    /// out-param. This shim performs the init + the env-var seeding that has
-    /// no T6 dependency; the `*mut ()` return stands in for `*mut DirInfo`
-    /// (opaque to install — every caller discards it).
-    pub(crate) fn configure_env_for_run(
-        ctx: &mut bun_options_types::context::ContextData,
-        this_transpiler: &mut ::core::mem::MaybeUninit<bun_transpiler::Transpiler<'static>>,
-        env: Option<*mut bun_dotenv::Loader>,
-        _log_errors: bool,
-        store_root_fd: bool,
-    ) -> Result<*mut (), crate::Error> {
+    /// The env-var seeding half of `bun run`'s
+    /// `bun_runtime::cli::RunCommand::configure_env_for_run`; the `DirInfo`
+    /// walk / `npm_package_*` half lives in the runtime and lifecycle scripts
+    /// never had it.
+    pub(crate) fn configure_env_for_run(env_loader: &mut bun_dotenv::Loader) {
         use bun_core::Global;
-
-        let args = ctx.args.clone();
-        this_transpiler.write(bun_transpiler::Transpiler::init(
-            install_runner_arena(),
-            ctx.log,
-            args,
-            env,
-        )?);
-        // SAFETY: fully written on the line above.
-        let this_transpiler = unsafe { this_transpiler.assume_init_mut() };
-        this_transpiler.options.env.behavior =
-            bun_options_types::schema::api::DotEnvBehavior::load_all;
-        this_transpiler.resolver.care_about_bin_folder = true;
-        this_transpiler.resolver.care_about_scripts = true;
-        this_transpiler.resolver.store_fd = store_root_fd;
-
-        // Re-derive per-use rather than holding a long-lived `&mut` (avoids
-        // Stacked-Borrows overlap with `run_env_loader`).
-        let env_loader = this_transpiler.env_mut();
 
         // Propagate --no-orphans / [run] noOrphans to the script's env so any
         // Bun process the script spawns enables its own watchdog. The env
@@ -849,11 +788,6 @@ impl RunCommand {
                     .put_default(b"npm_execpath", self_exe.as_bytes());
             }
         }
-
-        // DirInfo walk / npm_package_* seeding is performed by the T6 impl
-        // (`bun_runtime::cli::RunCommand::configure_env_for_run`); install
-        // callers discard the return value.
-        Ok(core::ptr::null_mut())
     }
 }
 
@@ -947,27 +881,23 @@ pub(crate) fn initialize_mini_store() {
         memory_store: bun_ast::ASTMemoryAllocator,
     }
 
+    // Per-thread and never freed (the AST allocator hooks keep pointing at it).
     thread_local! {
-        static INSTANCE: Cell<Option<*mut MiniStore>> = const { Cell::new(None) };
+        static INSTANCE: core::cell::RefCell<Option<&'static mut MiniStore>> =
+            const { core::cell::RefCell::new(None) };
     }
 
     INSTANCE.with(|instance| {
-        if instance.get().is_none() {
+        let mut instance = instance.borrow_mut();
+        if instance.is_none() {
             let heap = Arena::new();
             let memory_store = bun_ast::ASTMemoryAllocator::new(&heap);
-            let mini_store = bun_core::heap::into_raw(Box::new(MiniStore { heap, memory_store }));
-            // SAFETY: just allocated, non-null, thread-local exclusive access
-            unsafe {
-                (*mini_store).memory_store.reset();
-                (*mini_store).memory_store.push();
-            }
-            instance.set(Some(mini_store));
+            let mini_store = Box::leak(Box::new(MiniStore { heap, memory_store }));
+            mini_store.memory_store.reset();
+            mini_store.memory_store.push();
+            *instance = Some(mini_store);
         } else {
-            // SAFETY: pointer was heap-allocated on this thread in the branch above and is
-            // never freed; INSTANCE is thread-local and `Cell::get` copies the raw pointer
-            // out (no borrow of the Cell is held), so this `&mut` is the sole live reference
-            // to the allocation for its entire scope — no aliasing.
-            let mini_store = unsafe { &mut *instance.get().unwrap() };
+            let mini_store = instance.as_mut().unwrap();
             // `ASTMemoryAllocator` collapses SFA+fallback into a single bumpalo arena,
             // so there is no stack-buffer watermark to inspect — `reset()` already
             // releases all bump allocations. The size gate is
@@ -1040,7 +970,9 @@ impl Aligner {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Debug, Default, bytemuck::NoUninit, bytemuck::CheckedBitPattern,
+)]
 pub enum Origin {
     #[default]
     Local = 0,

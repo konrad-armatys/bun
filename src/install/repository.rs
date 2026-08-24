@@ -15,94 +15,6 @@ use crate::hosted_git_info;
 use crate::install::{self as Install, ExtractData, PackageManager};
 use crate::resolution::fmt_store_url;
 
-// Thread-local scratch buffers. Callers return slices that outlive the access
-// (`try_ssh`/`try_https` hand a slice straight to `download`). `thread_local!`
-// closures cannot express that without unsafe, so this is a leaked per-thread
-// allocation with per-field projection accessors and a documented
-// single-use-per-field invariant (see `tl_bufs()` / the `TlBufs` accessor docs
-// below).
-struct TlBufs {
-    final_path_buf: PathBuffer,
-    ssh_path_buf: PathBuffer,
-    folder_name_buf: PathBuffer,
-    json_path_buf: PathBuffer,
-}
-
-thread_local! {
-    // bun.ThreadlocalBuffers: store only a pointer in TLS; lazily heap-allocate the
-    // 4×PathBuffer payload on first use so the static-TLS template stays small
-    // (see test/js/bun/binary/tls-segment-size).
-    static TL_BUFS: core::cell::Cell<*mut TlBufs> =
-        const { core::cell::Cell::new(core::ptr::null_mut()) };
-}
-
-fn tl_bufs() -> *mut TlBufs {
-    // SAFETY (audited):
-    // - `TL_BUFS` is thread-local `Cell<*mut TlBufs>`: no cross-thread sharing; the
-    //   pointer is `Copy` so `.get()/.set()` are zero-unsafe. The payload itself is a
-    //   leaked heap alloc (lazy-init below), so the `*mut` stays valid for thread life.
-    // - This function returns `*mut TlBufs` (a freely-aliasing raw ptr) and never
-    //   asserts uniqueness over sibling buffers: call sites project a SINGLE field via
-    //   raw-ptr place expr `unsafe { &mut (*tl_bufs()).<field> }` so only that one
-    //   field is retagged Unique under Stacked Borrows.
-    // - This is load-bearing: `try_https`/`try_ssh` return a slice into
-    //   `final_path_buf`/`ssh_path_buf` which is then passed straight into
-    //   `download(..., url, ...)`. `download` itself
-    //   borrows `folder_name_buf`. Materializing `&mut TlBufs` over the WHOLE struct
-    //   here would create a fresh Unique tag that invalidates the live `url` slice — UB.
-    //   The invariant is therefore disjoint-FIELD access, not whole-struct uniqueness.
-    // - The raw pointer is valid for the lifetime of the current thread (thread-local
-    //   outlives all in-thread borrows; `TlBufs` has no `Drop`). Callers reborrow into
-    //   a raw `*mut PathBuffer` per field as a deliberate escape hatch so
-    //   `try_ssh`/`try_https` can return slices into the buffer.
-    //   Callers must not retain a slice into a given field across a subsequent reborrow
-    //   of that SAME field.
-    TL_BUFS.with(|c| {
-        let mut p = c.get();
-        if p.is_null() {
-            p = bun_core::heap::into_raw(Box::new(TlBufs {
-                final_path_buf: PathBuffer::ZEROED,
-                ssh_path_buf: PathBuffer::ZEROED,
-                folder_name_buf: PathBuffer::ZEROED,
-                json_path_buf: PathBuffer::ZEROED,
-            }));
-            c.set(p);
-        }
-        p
-    })
-}
-
-impl TlBufs {
-    // Per-field projection accessors. Each returns `&'static mut` over a
-    // disjoint thread-local `PathBuffer`; see [`tl_bufs`] for the
-    // Stacked-Borrows rationale (forming `&mut TlBufs` over the whole struct
-    // would invalidate live slices into sibling fields). Callers must not hold
-    // a returned borrow across a re-entry into the *same* accessor — the same
-    // single-thread non-reentrant-scratch contract the prior inline raw-ptr
-    // field projections imposed, now centralised here.
-    #[inline]
-    fn ssh_path_buf() -> &'static mut PathBuffer {
-        // SAFETY: see `tl_bufs()` — thread-local leaked alloc; per-field
-        // projection retags only this field.
-        unsafe { &mut (*tl_bufs()).ssh_path_buf }
-    }
-    #[inline]
-    fn final_path_buf() -> &'static mut PathBuffer {
-        // SAFETY: see `tl_bufs()`.
-        unsafe { &mut (*tl_bufs()).final_path_buf }
-    }
-    #[inline]
-    fn folder_name_buf() -> &'static mut PathBuffer {
-        // SAFETY: see `tl_bufs()`.
-        unsafe { &mut (*tl_bufs()).folder_name_buf }
-    }
-    #[inline]
-    fn json_path_buf() -> &'static mut PathBuffer {
-        // SAFETY: see `tl_bufs()`.
-        unsafe { &mut (*tl_bufs()).json_path_buf }
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct SloppyGlobalGitConfig {
     has_askpass: bool,
@@ -226,58 +138,43 @@ impl SloppyGlobalGitConfig {
 // once `RepositoryExt` is in scope.
 pub use bun_install_types::resolver_hooks::Repository;
 
-pub(crate) struct SharedEnv {
-    env: Option<bun_dotenv::Map>,
-}
+/// Process-global env map for the `git` subprocesses: cloned once from the
+/// manager's loader with the non-interactive defaults below, then shared
+/// read-only (`GitCloneRequest.env`, `GitCheckoutRequest.env`).
+pub(crate) struct SharedEnv;
 
-// Process-global env map. `get()` lazily clones `other.map` once; `Map` owns
-// its storage and is not `Copy`, so we hand out a `&'static Map` into the
-// global; callers (`GitCloneRequest.env`, `GitCheckoutRequest.env`) store the
-// reference. The map is written exactly once on first call from the main
-// install thread and never freed.
-// Lazy-init on the install main thread, then `&'static`-read from worker
-// threads. RacyCell — the install enqueue path is single-threaded at the
-// write point.
-static SHARED_ENV: bun_core::RacyCell<SharedEnv> = bun_core::RacyCell::new(SharedEnv { env: None });
+static SHARED_ENV: OnceLock<bun_dotenv::Map> = OnceLock::new();
 
 impl SharedEnv {
-    pub(crate) fn get(other: &mut bun_dotenv::Loader) -> &'static bun_dotenv::Map {
-        // SAFETY: `SHARED_ENV` is only initialised from the main install thread
-        // during enqueue (single-threaded at that point). Once
-        // `env` is `Some` it is never reassigned, so the returned `&'static`
-        // remains valid for the program lifetime.
-        unsafe {
-            let this = &mut *SHARED_ENV.get();
-            if this.env.is_none() {
-                // Note: currently if the user sets this to some value that causes
-                // a prompt for a password, the stdout of the prompt will be masked
-                // by further output of the rest of the install process.
-                // A value can still be entered, but we need to find a workaround
-                // so the user can see what is being prompted. By default the settings
-                // below will cause no prompt and throw instead.
-                let mut cloned = bun_core::handle_oom(other.map.clone_with_allocator());
+    pub(crate) fn get(other: &bun_dotenv::Loader) -> &'static bun_dotenv::Map {
+        SHARED_ENV.get_or_init(|| {
+            // Note: currently if the user sets this to some value that causes
+            // a prompt for a password, the stdout of the prompt will be masked
+            // by further output of the rest of the install process.
+            // A value can still be entered, but we need to find a workaround
+            // so the user can see what is being prompted. By default the settings
+            // below will cause no prompt and throw instead.
+            let mut cloned = bun_core::handle_oom(other.map.clone_with_allocator());
 
-                if cloned.get(b"GIT_ASKPASS").is_none() {
-                    let config = SloppyGlobalGitConfig::get();
-                    if !config.has_askpass {
-                        bun_core::handle_oom(cloned.put(b"GIT_ASKPASS", b"echo"));
-                    }
+            if cloned.get(b"GIT_ASKPASS").is_none() {
+                let config = SloppyGlobalGitConfig::get();
+                if !config.has_askpass {
+                    bun_core::handle_oom(cloned.put(b"GIT_ASKPASS", b"echo"));
                 }
-
-                if cloned.get(b"GIT_SSH_COMMAND").is_none() {
-                    let config = SloppyGlobalGitConfig::get();
-                    if !config.has_ssh_command {
-                        bun_core::handle_oom(cloned.put(
-                            b"GIT_SSH_COMMAND",
-                            b"ssh -oStrictHostKeyChecking=accept-new",
-                        ));
-                    }
-                }
-
-                this.env = Some(cloned);
             }
-            this.env.as_ref().unwrap()
-        }
+
+            if cloned.get(b"GIT_SSH_COMMAND").is_none() {
+                let config = SloppyGlobalGitConfig::get();
+                if !config.has_ssh_command {
+                    bun_core::handle_oom(cloned.put(
+                        b"GIT_SSH_COMMAND",
+                        b"ssh -oStrictHostKeyChecking=accept-new",
+                    ));
+                }
+            }
+
+            cloned
+        })
     }
 }
 
@@ -331,20 +228,21 @@ pub trait RepositoryExt: Sized {
     fn fmt_store_path<'a>(&'a self, label: &'a str, string_buf: &'a [u8])
     -> StorePathFormatter<'a>;
     fn fmt<'a>(&'a self, label: &'a str, buf: &'a [u8]) -> Formatter<'a>;
-    fn try_ssh(url: &[u8]) -> Option<&[u8]>;
-    fn try_https(url: &[u8]) -> Option<&[u8]>;
+    fn try_ssh<'a>(url: &'a [u8], buf: &'a mut PathBuffer) -> Option<&'a [u8]>;
+    fn try_https<'a>(url: &'a [u8], buf: &'a mut PathBuffer) -> Option<&'a [u8]>;
     fn download(
         env: &bun_dotenv::Map,
         log: &mut bun_ast::Log,
-        cache_dir: bun_sys::Fd,
+        cache: GitCache<'_>,
         task_id: crate::package_manager_task::Id,
         name: &[u8],
         url: &[u8],
         attempt: u8,
     ) -> Result<bun_sys::Dir, Error>;
     fn find_commit(
-        env: &mut bun_dotenv::Loader,
+        env: &bun_dotenv::Loader,
         log: &mut bun_ast::Log,
+        cache_dir_path: &[u8],
         repo_dir: bun_sys::Fd,
         name: &[u8],
         committish: &[u8],
@@ -353,12 +251,34 @@ pub trait RepositoryExt: Sized {
     fn checkout(
         env: &bun_dotenv::Map,
         log: &mut bun_ast::Log,
-        cache_dir: bun_sys::Fd,
+        cache: GitCache<'_>,
         repo_dir: bun_sys::Fd,
         name: &[u8],
         url: &[u8],
         resolved: &[u8],
     ) -> Result<ExtractData, Error>;
+}
+
+/// The package cache, as the git operations see it.
+#[derive(Clone, Copy)]
+pub struct GitCache<'a> {
+    /// Borrowed view of the manager's cache directory fd.
+    pub dir: bun_sys::Fd,
+    /// Its absolute path.
+    pub path: &'a [u8],
+    /// `--offline`: use cached clones as is and never reach the network.
+    pub offline: bool,
+}
+
+impl<'a> GitCache<'a> {
+    pub fn of(manager: &'a PackageManager) -> GitCache<'a> {
+        GitCache {
+            dir: manager.cache_directory(),
+            path: manager.cache_directory_path.as_bytes(),
+            offline: manager.options.offline
+                == crate::package_manager_real::options::OfflineMode::Offline,
+        }
+    }
 }
 
 /// A module-level free fn because trait methods cannot be private; called only
@@ -422,14 +342,15 @@ fn exec(env: &bun_dotenv::Map, argv: &[&[u8]]) -> Result<Vec<u8>, Error> {
 }
 
 /// A cache folder is built under a temporary sibling name and renamed onto `folder_name` once complete.
-struct CacheStaging {
+struct CacheStaging<'a> {
     cache_dir: bun_sys::Fd,
+    cache_dir_path: &'a [u8],
     tmp_name_buf: [u8; 64],
     tmp_name_len: usize,
 }
 
-impl CacheStaging {
-    fn new(cache_dir: bun_sys::Fd) -> Result<Self, Error> {
+impl<'a> CacheStaging<'a> {
+    fn new(cache_dir: bun_sys::Fd, cache_dir_path: &'a [u8]) -> Result<Self, Error> {
         let mut tmp_name_buf = [0u8; 64];
         let tmp_name_len =
             Path::fs::FileSystem::tmpname(b"tmp", &mut tmp_name_buf, bun_core::fast_random())
@@ -437,6 +358,7 @@ impl CacheStaging {
                 .len();
         Ok(Self {
             cache_dir,
+            cache_dir_path,
             tmp_name_buf,
             tmp_name_len,
         })
@@ -446,9 +368,9 @@ impl CacheStaging {
         &self.tmp_name_buf[..self.tmp_name_len]
     }
 
-    fn tmp_path(&self) -> &'static [u8] {
+    fn tmp_path(&self) -> &[u8] {
         Path::resolve_path::join_abs_string::<Path::platform::Auto>(
-            &PackageManager::get().cache_directory_path,
+            self.cache_dir_path,
             &[self.tmp_name()],
         )
     }
@@ -611,10 +533,7 @@ impl RepositoryExt for Repository {
         }
     }
 
-    fn try_ssh(url: &[u8]) -> Option<&[u8]> {
-        // May return a slice into the thread-local `ssh_path_buf` (see `tl_bufs()`);
-        // it is only valid until the next `try_ssh` call on this thread.
-        let ssh_path_buf = TlBufs::ssh_path_buf();
+    fn try_ssh<'a>(url: &'a [u8], ssh_path_buf: &'a mut PathBuffer) -> Option<&'a [u8]> {
         // Do not cast explicit http(s) URLs to SSH
         if url.starts_with(b"http") {
             return None;
@@ -647,7 +566,6 @@ impl RepositoryExt for Repository {
                 return Some(url); // If correction fails, return original
             };
 
-            // Copy corrected URL to thread-local buffer
             let corrected_str = corrected.url_slice();
             if corrected_str.len() > ssh_path_buf.len() {
                 return Some(url);
@@ -694,11 +612,7 @@ impl RepositoryExt for Repository {
         None
     }
 
-    fn try_https(url: &[u8]) -> Option<&[u8]> {
-        // May return a slice into the thread-local `final_path_buf` (see `tl_bufs()`);
-        // it is only valid until the next use of `TlBufs::final_path_buf()` on this
-        // thread (another `try_https` call, or `checkout`'s `get_fd_path`).
-        let final_path_buf = TlBufs::final_path_buf();
+    fn try_https<'a>(url: &'a [u8], final_path_buf: &'a mut PathBuffer) -> Option<&'a [u8]> {
         if url.starts_with(b"http") {
             return Some(url);
         }
@@ -757,21 +671,19 @@ impl RepositoryExt for Repository {
     fn download(
         env: &bun_dotenv::Map,
         log: &mut bun_ast::Log,
-        cache_dir: bun_sys::Fd,
+        cache: GitCache<'_>,
         task_id: crate::package_manager_task::Id,
         name: &[u8],
         url: &[u8],
         attempt: u8,
     ) -> Result<bun_sys::Dir, Error> {
-        // `cache_dir` is a borrowed view of the manager's cache directory fd;
+        // `cache.dir` is a borrowed view of the manager's cache directory fd;
         // we never own/close it — only the freshly-opened repo `Dir` is owned.
+        let cache_dir = cache.dir;
         bun_analytics::features::git_dependencies
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // Per-field accessor — retags only `folder_name_buf`, leaving any live
-        // shared borrow of `final_path_buf`/`ssh_path_buf` (the `url` argument
-        // handed over by `try_https`/`try_ssh` callers) valid under Stacked
-        // Borrows.
-        let folder_name_buf = TlBufs::folder_name_buf();
+        let mut folder_name_buf = [0u8; 32];
+        let folder_name_buf = &mut folder_name_buf;
         let folder_name = {
             use std::io::Write;
             let total = folder_name_buf.len();
@@ -789,16 +701,14 @@ impl RepositoryExt for Repository {
         match bun_sys::Dir::borrow(&cache_dir).open_dir_z(folder_name) {
             Ok(dir) => {
                 let path = Path::resolve_path::join_abs_string::<Path::platform::Auto>(
-                    &PackageManager::get().cache_directory_path,
+                    cache.path,
                     &[folder_name.as_bytes()],
                 );
 
                 // --offline: use the cached clone as is (--prefer-offline still fetches:
                 // git dependencies pin exact commits, so a stale clone would fail to find a
                 // newly referenced one rather than "resolve older")
-                if PackageManager::get().options.offline
-                    != crate::package_manager_real::options::OfflineMode::Offline
-                {
+                if !cache.offline {
                     if let Err(err) = exec(env, &[b"git", b"-C", path, b"fetch", b"--quiet"]) {
                         log.add_error_fmt(
                             None,
@@ -814,9 +724,7 @@ impl RepositoryExt for Repository {
                 if not_found.get_errno() != bun_sys::E::ENOENT {
                     return Err(not_found.into());
                 }
-                if PackageManager::get().options.offline
-                    == crate::package_manager_real::options::OfflineMode::Offline
-                {
+                if cache.offline {
                     log.add_error_fmt(
                         None,
                         bun_ast::Loc::EMPTY,
@@ -828,7 +736,7 @@ impl RepositoryExt for Repository {
                     return Err(crate::Error::InstallFailed);
                 }
 
-                let staging = CacheStaging::new(cache_dir)?;
+                let staging = CacheStaging::new(cache_dir, cache.path)?;
                 if let Err(err) = exec(
                     env,
                     &[
@@ -859,14 +767,16 @@ impl RepositoryExt for Repository {
     }
 
     fn find_commit(
-        env: &mut bun_dotenv::Loader,
+        env: &bun_dotenv::Loader,
         log: &mut bun_ast::Log,
+        cache_dir_path: &[u8],
         repo_dir: bun_sys::Fd,
         name: &[u8],
         committish: &[u8],
         task_id: crate::package_manager_task::Id,
     ) -> Result<Vec<u8>, Error> {
-        let folder_name_buf = TlBufs::folder_name_buf();
+        let mut folder_name_buf = [0u8; 32];
+        let folder_name_buf = &mut folder_name_buf;
         let folder_name = {
             use std::io::Write;
             let total = folder_name_buf.len();
@@ -881,7 +791,7 @@ impl RepositoryExt for Repository {
             &folder_name_buf[..written]
         };
         let path = Path::resolve_path::join_abs_string::<Path::platform::Auto>(
-            &PackageManager::get().cache_directory_path,
+            cache_dir_path,
             &[folder_name],
         );
 
@@ -929,13 +839,14 @@ impl RepositoryExt for Repository {
     fn checkout(
         env: &bun_dotenv::Map,
         log: &mut bun_ast::Log,
-        cache_dir: bun_sys::Fd,
+        cache: GitCache<'_>,
         repo_dir: bun_sys::Fd,
         name: &[u8],
         url: &[u8],
         resolved: &[u8],
     ) -> Result<ExtractData, Error> {
-        // `cache_dir`/`repo_dir` are borrowed views; only `package_dir` is owned.
+        // `cache.dir`/`repo_dir` are borrowed views; only `package_dir` is owned.
+        let cache_dir = cache.dir;
         bun_analytics::features::git_dependencies
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
@@ -952,7 +863,7 @@ impl RepositoryExt for Repository {
             return Err(crate::Error::InstallFailed);
         }
 
-        let folder_name_buf = TlBufs::folder_name_buf();
+        let mut folder_name_buf = PathBuffer::uninit();
         let folder_name = crate::package_manager_real::cached_git_folder_name_print(
             &mut folder_name_buf[..],
             resolved,
@@ -971,14 +882,10 @@ impl RepositoryExt for Repository {
                 Err(err) if err.get_errno() == bun_sys::E::ENOENT => {}
                 Err(err) => return Err(err.into()),
             }
-            let repo_path = bun_sys::get_fd_path(
-                repo_dir,
-                // Per-field accessor — disjoint from `folder_name_buf`
-                // borrow above. See `TlBufs` accessor doc.
-                TlBufs::final_path_buf(),
-            )?;
+            let mut repo_path_buf = PathBuffer::uninit();
+            let repo_path = bun_sys::get_fd_path(repo_dir, &mut repo_path_buf)?;
 
-            let staging = CacheStaging::new(cache_dir)?;
+            let staging = CacheStaging::new(cache_dir, cache.path)?;
             if let Err(err) = exec(
                 env,
                 &[
@@ -1098,7 +1005,8 @@ impl RepositoryExt for Repository {
                 }
             };
 
-        let json_path = match json_file.get_path(TlBufs::json_path_buf()) {
+        let mut json_path_buf = PathBuffer::uninit();
+        let json_path = match json_file.get_path(&mut json_path_buf) {
             Ok(p) => p,
             Err(err) => {
                 log.add_error_fmt(
@@ -1116,8 +1024,7 @@ impl RepositoryExt for Repository {
             }
         };
 
-        // `json_path` lives in the thread-local
-        // `json_path_buf` (not in `json_file`), and `json_buf` is an owned alloc,
+        // `json_path` lives in `json_path_buf` (not in `json_file`), and `json_buf` is an owned alloc,
         // so both fds are dead here — close before the fallible append so the
         // `?`-propagation path doesn't leak them.
         let _ = json_file.close(); // close error is non-actionable

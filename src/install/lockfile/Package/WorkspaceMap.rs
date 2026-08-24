@@ -153,6 +153,9 @@ pub(crate) enum MissingWorkspace<'a> {
     Error,
     Skip,
     SkipIfInLockfile(&'a Lockfile),
+    /// [`SkipIfInLockfile`](Self::SkipIfInLockfile) with the lockfile's
+    /// workspace paths already copied out (the lockfile is being written).
+    SkipIfListed(&'a [&'a [u8]]),
 }
 
 fn process_workspace_name(
@@ -336,6 +339,15 @@ impl WorkspaceMap {
                                             workspace_dir_of(abs),
                                         ),
                                     )
+                                }),
+                            MissingWorkspace::SkipIfListed(paths) => abs_package_json_path
+                                .is_some_and(|abs| {
+                                    let rel = relative_workspace_path(
+                                        &mut rel_path_buf.0,
+                                        root_dir,
+                                        workspace_dir_of(abs),
+                                    );
+                                    paths.contains(&rel)
                                 }),
                         };
                         if tolerated {

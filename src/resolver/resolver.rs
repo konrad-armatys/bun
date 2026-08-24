@@ -20,23 +20,26 @@ use ::bun_install_types::resolver_hooks as Install;
 use ::bun_install_types::resolver_hooks::{AutoInstaller, Resolution};
 use ::bun_semver as Semver;
 
-// LAYERING: `PackageManager.initWithRuntime` lives in
-// `bun_install`, which depends on this crate. The lazy-init body is defined
-// `#[no_mangle]` in `bun_install::auto_installer` and resolved at link time
-// (same pattern as `__bun_regex_*` / `__BUN_RUNTIME_HOOKS`). `install` is the
-// `?*Api.BunInstall` (`self.opts.install`); `env` is the `*DotEnv.Loader`.
-unsafe extern "Rust" {
-    /// SAFETY (genuine FFI precondition — NOT a `safe fn` candidate): impl
-    /// reborrows `&mut *log` / `&mut *env` and reads `*install` if non-null.
-    /// All three must point at process-lifetime Transpiler-owned storage; the
-    /// returned `NonNull` names the `'static` `PackageManager` singleton.
-    /// Errs when the one-time init fails (e.g. the top-level directory is
-    /// unreadable); the failure is sticky across calls.
-    fn __bun_resolver_init_package_manager(
-        log: NonNull<bun_ast::Log>,
-        install: Option<NonNull<bun_options_types::schema::api::BunInstall>>,
-        env: NonNull<bun_dotenv::Loader>,
-    ) -> core::result::Result<NonNull<dyn AutoInstaller>, bun_errno::SystemErrno>;
+// LAYERING: `PackageManager.initWithRuntime` lives in `bun_install`, which
+// depends on this crate, so the runtime registers it here at startup
+// ([`set_auto_installer_factory`]). `install` is the `?*Api.BunInstall`
+// (`self.opts.install`); `env` is the `*DotEnv.Loader`.
+/// Builds (once per call site) the auto-install package manager. Errs when
+/// the one-time init fails (e.g. the top-level directory is unreadable).
+pub type AutoInstallerFactory =
+    fn(
+        log: &mut bun_ast::Log,
+        install: Option<&bun_options_types::schema::api::BunInstall>,
+        env: &mut bun_dotenv::Loader,
+    ) -> core::result::Result<&'static mut dyn AutoInstaller, bun_errno::SystemErrno>;
+
+static AUTO_INSTALLER_FACTORY: std::sync::OnceLock<AutoInstallerFactory> =
+    std::sync::OnceLock::new();
+
+/// Register the auto-installer factory (the runtime does this once at startup
+/// with `bun_install`'s).
+pub fn set_auto_installer_factory(factory: AutoInstallerFactory) {
+    let _ = AUTO_INSTALLER_FACTORY.set(factory);
 }
 use crate::cache::Set as CacheSet;
 use ::bun_resolve_builtins::{Alias as HardcodedAlias, Cfg as HardcodedAliasCfg};
@@ -499,8 +502,8 @@ pub struct Resolver<'a> {
     /// [`AutoInstaller`]; the resolver only sees the trait object so it stays
     /// below `bun_install` in the dep graph. `None` until the auto-install
     /// path is first reached: [`get_package_manager`] then initializes the
-    /// singleton through the link-time `__bun_resolver_init_package_manager`
-    /// factory and caches the pointer here. A failed init (e.g. unreadable
+    /// singleton through the registered [`AutoInstallerFactory`] and caches
+    /// the pointer here. A failed init (e.g. unreadable
     /// top-level directory) is returned as an error and leaves this `None`.
     pub package_manager: Option<NonNull<dyn AutoInstaller>>,
     pub on_wake_package_manager: Install::WakeHandler,
@@ -814,9 +817,8 @@ impl<'a> Resolver<'a> {
     /// Lazily initializing
     /// `PackageManager.initWithRuntime` here directly would
     /// be a `bun_resolver → bun_install` cycle, so the lazy init is
-    /// dispatched through the link-time `extern "Rust"` factory
-    /// [`__bun_resolver_init_package_manager`] (defined `#[no_mangle]` in
-    /// `bun_install::auto_installer`). The factory performs
+    /// dispatched through the registered [`AutoInstallerFactory`]
+    /// (`bun_install::auto_installer::init_for_resolver`). The factory performs
     /// `HTTPThread.init` + `PackageManager.initWithRuntime` and returns the
     /// process-static singleton as a `dyn AutoInstaller`. We then wire
     /// `on_wake` and cache the pointer. Reached from
@@ -832,15 +834,23 @@ impl<'a> Resolver<'a> {
         let env: NonNull<DotEnv::Loader> = self
             .env_loader
             .expect("Resolver.env_loader must be set before auto-install");
-        // SAFETY: `__bun_resolver_init_package_manager` is defined
-        // `#[no_mangle]` in `bun_install::auto_installer` and linked into the
-        // final binary; `self.log` / `self.opts.install` / `env` point at
-        // process-lifetime storage (Transpiler-owned). The returned pointer
-        // names the `PackageManager` singleton (`'static`).
-        let pm: NonNull<dyn AutoInstaller> =
-            unsafe { __bun_resolver_init_package_manager(self.log, self.opts.install, env) }?;
-        // SAFETY: `pm` is the just-initialized singleton; sole `&mut` here.
-        unsafe { (*pm.as_ptr()).set_on_wake(self.on_wake_package_manager) };
+        let factory = *AUTO_INSTALLER_FACTORY
+            .get()
+            .expect("auto-installer factory registered at startup");
+        let (mut log, mut env) = (self.log, env);
+        // SAFETY: `self.log` / `self.opts.install` / `env` point at
+        // process-lifetime storage (Transpiler-owned) with no other `&mut`
+        // live across this call. The returned pointer names the leaked
+        // `PackageManager` (`'static`).
+        let pm: &'static mut dyn AutoInstaller = unsafe {
+            factory(
+                log.as_mut(),
+                self.opts.install.map(|p| &*p.as_ptr()),
+                env.as_mut(),
+            )
+        }?;
+        pm.set_on_wake(self.on_wake_package_manager);
+        let pm = NonNull::from(pm);
         self.package_manager = Some(pm);
         Ok(pm.as_ptr())
     }
@@ -851,7 +861,7 @@ impl<'a> Resolver<'a> {
     /// Option<NonNull<dyn AutoInstaller>>` field. The pointee is the
     /// process-static `PackageManager` singleton (set via
     /// [`get_package_manager`](Self::get_package_manager) /
-    /// `__bun_resolver_init_package_manager`), so it strictly outlives the
+    /// the [`AutoInstallerFactory`]), so it strictly outlives the
     /// resolver. `&mut self` ensures the returned `&mut dyn AutoInstaller` is
     /// the only live reference for its lifetime.
     #[inline]
