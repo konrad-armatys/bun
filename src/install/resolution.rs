@@ -71,8 +71,8 @@ impl<SemverInt: VersionInt> Default for ResolutionType<SemverInt> {
     }
 }
 
-/// Rust-side equivalent of `bun.meta.Tagged(Value, Tag)` — a tagged view of `Value`
-/// used by [`ResolutionType::init`] / [`value_init`] to construct a zero-padded union.
+/// A tagged view of `Value` used by [`ResolutionType::init`] / [`value_init`]
+/// to construct the zero-padded storage.
 // `Tag` is a `#[repr(transparent)] struct Tag(u8)` with sparse `pub const`
 // associated values; the derive maps `Self::Variant` → `Tag::Variant` by name.
 #[derive(Clone, Copy, bun_core::EnumTag)]

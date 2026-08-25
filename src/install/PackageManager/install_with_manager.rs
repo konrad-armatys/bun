@@ -941,8 +941,8 @@ pub fn install_with_manager(
 // ─── runAndWaitFn closure family ──────────────────────────────────────────
 // A const-generic struct + three thin wrapper fns.
 
-/// `RunTasksCtx` for the void-callback `runTasks` call inside
-/// `runAndWaitFn::isDone` (no hooks, `progress_bar = true`).
+/// `RunTasksCtx` for the hook-less `run_tasks` call inside
+/// `run_and_wait` / `is_done` (`progress_bar = true`).
 struct InstallWaitCtx<'a>(&'a mut PackageManager);
 impl RunTasksCtx for InstallWaitCtx<'_> {
     fn manager(&mut self) -> &mut PackageManager {

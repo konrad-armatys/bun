@@ -1724,8 +1724,8 @@ fn warn_unmet_peer_dependency(
 }
 
 /// Allocate and initialise an `.extract` Task for an npm tarball.
-/// Shared by the buffered path (`enqueueExtractNPMPackage`) and the
-/// streaming path (`createExtractTaskForStreaming`) so both produce
+/// Shared by the buffered path (`enqueue_extract_npm_package`) and the
+/// streaming path (`create_extract_task_for_streaming`) so both produce
 /// an identical Task shape; only the return type differs.
 fn init_extract_task(
     this: &PackageManager,
@@ -1889,8 +1889,8 @@ fn enqueue_local_tarball(
     // callback runs on a ThreadPool worker and must not read
     // `lockfile.packages` / `lockfile.buffers.string_bytes`: those buffers
     // can be reallocated concurrently by the main thread while processing
-    // other dependencies (e.g. `appendPackage` / `StringBuilder.allocate`
-    // in `Package.fromNPM`).
+    // other dependencies (e.g. `append_package` / `StringBuilder::allocate`
+    // in `Package::from_npm`).
     let cache_dir = get_cache_directory(this);
     let temp_dir = get_temporary_directory(this).handle.fd();
     let mut abs_buf = PathBuffer::uninit();

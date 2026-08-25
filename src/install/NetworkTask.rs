@@ -755,9 +755,9 @@ impl NetworkTask {
         let mut http_options = AsyncHTTPOptions::default();
 
         if extract_tarball::uses_streaming_extraction() {
-            // Tell the HTTP client to invoke `notify` for every body chunk
-            // instead of buffering the whole response. `notify` pushes each
-            // chunk into `tarball_stream`, which schedules a drain task on
+            // Tell the HTTP client to report every body chunk (`on_progress`,
+            // then `on_done`) instead of buffering the whole response. Those
+            // push each chunk into `tarball_stream`, which schedules a drain task on
             // `thread_pool`; the drain task calls into libarchive until it
             // reports ARCHIVE_RETRY (out of input), then returns so the
             // worker can be reused for other install work. The next chunk
@@ -765,8 +765,8 @@ impl NetworkTask {
             // — resumes exactly where it stopped.
             //
             // The stream itself is created by the caller (see
-            // `generateNetworkTaskForTarball`) because it needs the
-            // pre-allocated `Task` that carries the final result.
+            // `generate_network_task_for_tarball`) because it needs the
+            // `Task` (`streaming_extract_task`) that carries the final result.
             //
             // Only wire up the one signal we need; `Signals.Store.to()`
             // would also publish `aborted`/`cert_errors`/etc., which makes

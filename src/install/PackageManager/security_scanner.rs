@@ -1346,7 +1346,7 @@ impl SecurityScanSubprocess {
             // If it bailed early (EAGAIN limit / unexpected errno / fd already
             // invalid) leave the FilePoll registered: the next `tick_once`
             // has no pending task, so it ticks uws, the poll delivers
-            // readable+HUP, `read_with_fn` drains to `Ok(0)`, and
+            // readable+HUP, the reader drains to `Ok(0)`, and
             // `on_reader_done` decrements `remaining_fds` exactly once.
             //
             // Windows reads via libuv (async) and the fd here is a uv-owned

@@ -354,11 +354,9 @@ impl PackageManager {
         // shared borrow does not span it.
         let original_path: Vec<u8> = script_env.get(b"PATH").unwrap_or(b"").to_vec();
 
-        // `EnvPathOptions` is currently fieldless.
         let mut path = EnvPath::init_capacity(
             original_path.len() + 1 + b"node_modules/.bin".len() + cwd.len() + 1,
         )?;
-        // `defer PATH.deinit()` — handled by Drop
 
         let mut parent: Option<&[u8]> = Some(cwd);
 

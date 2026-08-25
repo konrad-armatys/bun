@@ -429,8 +429,8 @@ impl PatchTask {
         // `PackageInstall` also wants `&mut tmpname_buf[..]` for
         // `destination_dir_subpath_buf`. `PackageInstall` assumes
         // `destination_dir_subpath` is a prefix slice *into*
-        // `destination_dir_subpath_buf` (see `verifyGitResolution` /
-        // `verifyPackageJSONNameAndVersion`), and that aliasing can't be
+        // `destination_dir_subpath_buf` (see `verify_git_resolution` /
+        // `verify_package_json_name_and_version`), and that aliasing can't be
         // expressed with `&ZStr` + `&mut [u8]`, so use a separate buffer but
         // mirror the prefix bytes so the invariant holds for any future call
         // that reaches those paths.
@@ -753,8 +753,6 @@ impl PatchTask {
         let patch_hash_idx = strings::index_of(cache_dir_subpath_bytes, b"_patch_hash=")
             .unwrap_or_else(|| panic!("This is a bug in Bun."));
 
-        // need to dupe this as it's calculated using
-        // `PackageManager.cached_package_folder_name_buf` which may be modified
         let cache_dir_subpath = ZBox::from_bytes(cache_dir_subpath_bytes);
         let cache_dir_subpath_without_patch_hash =
             ZBox::from_bytes(&cache_dir_subpath_bytes[..patch_hash_idx]);

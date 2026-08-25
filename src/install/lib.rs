@@ -35,12 +35,7 @@ pub(crate) mod bun_fs {
     pub(crate) use bun_resolver::fs::*;
 }
 
-/// `bun_progress` → re-export of the real `bun_core::Progress` (snapshot of
-/// pre-0.13 `std.Progress`). The earlier value-type counter shim was dropped
-/// once `ProgressStrings.rs`, `hoisted_install.rs`, `runTasks.rs` etc. started
-/// touching the full surface (`supports_ansi_escape_codes`, public `root`,
-/// `unprotected_*` atomics, `&mut Node` from `start()`); keeping a parallel
-/// type here just bifurcated `Node` identity across the crate.
+/// `bun_core::Progress` under the name the install code uses.
 pub(crate) mod bun_progress {
     pub(crate) use bun_core::Progress::{Node, Progress};
 }
@@ -682,11 +677,6 @@ impl RunCommand {
             let image_path = win::exe_path_w();
             for name in [strings::w!("\\node.exe\0"), strings::w!("\\bun.exe\0")] {
                 target_path_buffer[dir_slice_len..][..name.len()].copy_from_slice(name);
-                // `target_path_buffer` is mutated in place between FFI calls
-                // (the dir-NUL/backslash toggle below).
-                // Under Stacked Borrows a `*const` derived via `Deref::deref`
-                // is invalidated by the intervening `&mut` from `IndexMut`, so
-                // re-derive `as_ptr()` at each FFI call site instead of caching.
                 if win::CreateHardLinkW(target_path_buffer.as_ptr(), image_path.as_ptr(), None) == 0
                 {
                     match win::Win32Error::get() {

@@ -316,13 +316,11 @@ bun_output::declare_scope!(PackageManager, hidden);
 pub struct PackageManager {
     pub(crate) cache_directory: Option<bun_sys::Dir>,
     pub(crate) cache_directory_path: ZBox, // owned; process lifetime via the leaked singleton
-    /// The resolver's directory-cache entry for the project root (process-lifetime `BSSMap` slot).
+    /// The resolver's directory-cache entry for the project root (lives as long as the resolver's directory cache).
     pub root_dir: &'static fs::DirEntry,
-    // allocator dropped per §Allocators (was `bun.default_allocator`). For the
-    // handful of sites that allocated AST nodes via `Expr.allocate(manager.allocator, …)`
-    // — i.e. nodes that must outlive `Expr.Data.Store.reset()` across workspace
-    // iterations — use `ast_arena` instead. The manager is a leaked singleton, so
-    // this arena has process lifetime.
+    /// AST nodes that must outlive `Expr.Data.Store.reset()` across workspace
+    /// iterations are allocated here. The manager is a leaked singleton, so
+    /// this arena has process lifetime.
     pub(crate) ast_arena: bun_alloc::Arena,
     /// The install log. In CLI mode `init()` re-points the command context's
     /// `log` at this one, so the rest of the CLI reads and prints the same log.
@@ -405,7 +403,7 @@ pub struct PackageManager {
 
     pub(crate) event_loop: AnyEventLoop,
 
-    // During `installPackages` we learn exactly what dependencies from --trust
+    // While installing packages we learn exactly what dependencies from --trust
     // actually have scripts to run, and we add them to this list
     pub(crate) trusted_deps_to_add_to_package_json: Vec<Box<[u8]>>,
 
@@ -758,7 +756,7 @@ impl PackageManager {
     }
 }
 
-// Only consumer is `hasEnoughTimePassedBetweenWaitingMessages`.
+// Only consumer is `has_enough_time_passed_between_waiting_messages`.
 // Main-thread-only, so `Relaxed` suffices.
 static TIME_PASSER_LAST_TIME: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
@@ -1784,8 +1782,6 @@ fn init_with_log(
 
     let top_level_dir_z = ZBox::from_bytes(fs.top_level_dir());
     bun_sys::chdir(&top_level_dir_z)?;
-    // `loadConfig` was moved down into `bun_bunfig`
-    // (MOVE_DOWN b0) so install can call it directly — no fn-pointer hook.
     bun_bunfig::arguments::load_config(
         bun_options_types::command_tag::Tag::InstallCommand,
         cli.config,
@@ -1917,11 +1913,11 @@ fn init_with_log(
         // (`bun_event_loop::mini_event_loop::GLOBAL`).
         if let AnyEventLoop::Mini(mini) = &mut event_loop {
             let mini_ptr: *mut MiniEventLoop = &raw mut **mini;
-            // Set ONLY `MiniEventLoop.global`,
-            // NOT `globalInitialized`. The distinction is load-bearing: a later
-            // `initGlobal(env, top_level_dir)` (e.g. from `bun pm pack` /
+            // Set ONLY `mini_event_loop::GLOBAL`,
+            // NOT `GLOBAL_INITIALIZED`. The distinction is load-bearing: a later
+            // `init_global(env, top_level_dir)` (e.g. from `bun pm pack` /
             // `pm version` lifecycle scripts → RunCommand::run_package_script_*)
-            // checks `globalInitialized` and, when false, allocates a FRESH mini
+            // checks `GLOBAL_INITIALIZED` and, when false, allocates a FRESH mini
             // with env/top_level_dir/uv-loop fully wired, then that becomes the
             // global. If we flip `GLOBAL_INITIALIZED` here, that call returns
             // *this* embedded mini instead — which was constructed without env,

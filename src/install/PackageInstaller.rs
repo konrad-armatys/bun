@@ -286,8 +286,6 @@ pub struct TreeContext {
 
 type TreeContextId = lockfile::tree::Id;
 
-// TreeContext::deinit dropped — Vec and Bin::PriorityQueue impl Drop.
-
 /// Finds the tree whose `node_modules` contains `target_pkg_id`, walked in
 /// Node resolution order from `<start_tree>/<alias>/`: the child tree at
 /// `<start_tree>/<alias>/node_modules/`, then `start_tree`, then each ancestor.
@@ -798,16 +796,12 @@ impl<'a> PackageInstaller<'a> {
                 )
             {
                 // If installing these packages completes the tree, we don't allow it
-                // to call `installAvailablePackages` recursively. Starting at id 0 and
+                // to call `install_available_packages` recursively. Starting at id 0 and
                 // going up ensures we will reach any trees that will be able to install
                 // packages upon completing the current tree
                 //
-                // spec iterates `tree.pending_installs.items` by struct
-                // copy (each `context.path` is the same allocation that lives in
-                // `pending_installs`) and `defer clearRetainingCapacity()` at the end.
-                // Drain by move (`mem::take`) to transfer ownership without the
-                // O(pending_installs) extra `.clone()` allocations and to leave
-                // `pending_installs` empty as the spec's defer does.
+                // Drain by move (`mem::take`): no per-item clones, and
+                // `pending_installs` is left empty.
                 for context in core::mem::take(&mut self.trees[i].pending_installs) {
                     let package_id = self.manager.lockfile.buffers.resolutions.as_slice()
                         [context.dependency_id as usize];

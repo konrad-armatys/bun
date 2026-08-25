@@ -1257,10 +1257,8 @@ impl<'a> PackageInstall<'a> {
         #[cfg(not(windows))]
         type WinOffset = ();
 
-        // Two overlapping slices into the same buffer (`head` is the whole
-        // buffer, `to_copy_into` is its tail) would be two live aliasing
-        // `&mut [u16]`, which is UB — pass head buffer + tail offset and
-        // reslice inside.
+        // Takes the whole buffer plus the tail's offset (not two slices of
+        // one buffer) and reslices inside.
         fn copy(
             destination_dir_: &Dir,
             walker: &mut Walker,
@@ -1485,10 +1483,8 @@ impl<'a> PackageInstall<'a> {
         #[cfg(not(windows))]
         type WinOffset = ();
 
-        // Two overlapping slices into the same buffer (`head` is the whole
-        // buffer, `to_copy_into` is its tail) would be two live aliasing
-        // `&mut [u16]`, which is UB — pass head buffer + tail offset and
-        // reslice inside.
+        // Takes the whole buffer plus the tail's offset (not two slices of
+        // one buffer) and reslices inside.
         fn copy(
             thread_pool: &ThreadPool,
             destination_dir: &Dir,

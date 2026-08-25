@@ -875,11 +875,6 @@ pub mod lib {
         }
     }
 
-    // ── Archive::Iterator ──────────────────────────────────────────────────
-    // Thin
-    // wrapper that opens a tarball from memory and yields one
-    // `IteratorEntry` per `next()`, used by `bun publish <tarball>`.
-
     // ── StreamingArchive ───────────────────────────────────────────────────
     // A gzip+tar read archive fed incrementally by a caller-supplied source
     // (`archive_read_open` with a read callback). With the resumable

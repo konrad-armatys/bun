@@ -542,8 +542,7 @@ pub enum Request {
 pub struct GitCloneRequest {
     pub(crate) name: StringOrTinyString,
     pub(crate) url: StringOrTinyString,
-    // `Map` owns its storage; store a
-    // `&'static` into the global `Repository.shared_env` instead — see `SharedEnv::get`.
+    /// The process-wide git environment (`repository::SharedEnv::get`).
     pub(crate) env: &'static dot_env::Map,
     pub(crate) res: Resolution,
 }

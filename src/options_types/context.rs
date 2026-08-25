@@ -162,7 +162,6 @@ impl ContextData {
         unsafe { &mut *self.log }
     }
 
-    /// Shared-ref counterpart of [`log_mut`] for read-only inspection
     /// Exclusive access to the log through exclusive access to the context.
     #[track_caller]
     #[inline]
@@ -176,6 +175,7 @@ impl ContextData {
         unsafe { &mut *self.log }
     }
 
+    /// Shared-ref counterpart of [`log_mut`] for read-only inspection
     /// (`has_errors()`, `print()`).
     #[track_caller]
     #[inline]

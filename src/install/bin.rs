@@ -1470,7 +1470,7 @@ impl<'a> Linker<'a> {
             }
         }
 
-        // Nothing found; return the primary so `linkBinOrCreateShim` sets
+        // Nothing found; return the primary so `link_bin_or_create_shim` sets
         // `skipped_due_to_missing_bin` and the caller retries without the
         // redirect.
         resolve_path::join_abs_string_z::<PlatformAuto>(package_dir, &[target])

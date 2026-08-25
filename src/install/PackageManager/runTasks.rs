@@ -149,7 +149,8 @@ impl RunTasksCtx for PackageManager {
     }
 }
 
-/// Called from isolated_install on the main thread.
+/// Drain finished network/extract/git/patch work into the lockfile and
+/// enqueue whatever it unblocks. Main thread only.
 pub fn run_tasks(
     ctx: &mut dyn RunTasksCtx,
     install_peer: bool,
@@ -596,9 +597,9 @@ fn process_network_task(
 
                 // Past this point we will not retry. If streaming state was
                 // allocated but never scheduled, release it now so the
-                // pre-created Task goes back to the pool and the stream
-                // buffers are freed. The buffered `enqueueExtractNPMPackage`
-                // path below allocates its own Task.
+                // pre-created Task and the stream buffers are freed. The
+                // buffered `enqueue_extract_npm_package` path below allocates
+                // its own Task.
                 task.discard_unused_streaming_state();
 
                 let Some(metadata) = task.response.metadata.as_ref().filter(|_| !download_failed)
@@ -900,7 +901,7 @@ fn process_resolve_task(
 
                     // Extract-task failure (integrity check, libarchive error, etc.)
                     // is symmetric with the HTTP 4xx/5xx branch above: mark the
-                    // dedupe entry as failed so a later `enqueuePackageForDownload`
+                    // dedupe entry as failed so a later `enqueue_package_for_download`
                     // for this `task_id` fails fast instead of waiting on this
                     // failed one forever or re-downloading it. Runs before the
                     // callback branch so `Store.Installer` (which `continue`s from
@@ -940,7 +941,7 @@ fn process_resolve_task(
 
                     // Void-callback fallback (resolve phase): drain the
                     // `task_queue` entry too so a later install-phase
-                    // `enqueuePackageForDownload` doesn't wedge on `found_existing`.
+                    // `enqueue_package_for_download` doesn't wedge on `found_existing`.
                     if let Some(removed) = manager.task_queue.remove(&task.id) {
                         drop(removed);
                     }

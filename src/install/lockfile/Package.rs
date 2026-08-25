@@ -1010,7 +1010,7 @@ impl Diff {
             ),
             _ => true,
         };
-        // `parseWithJSON` may grow `to_lockfile.buffers.dependencies` and
+        // `parse_with_json` may grow `to_lockfile.buffers.dependencies` and
         // invalidate the old slice, so `to_deps` is re-derived after it. Held as raw fat
         // pointers so the `&mut to_lockfile`/`&mut from_lockfile` reborrows below
         // (sort, recursive `generate`) don't conflict with these read views; the
@@ -3130,8 +3130,8 @@ pub mod serializer {
         let end_at = stream.get_pos()?;
         stream.write_int_le::<u64>(0)?;
 
-        // `*mut u8` carries the pointer alignment, matching the
-        // `@alignOf(@TypeOf(list.bytes))` value serialized above.
+        // `*mut u8` carries the pointer alignment, matching the value
+        // serialized above.
         let pos = stream.get_pos()? as u64;
         let _ = Aligner::write::<*mut u8, _>(&mut *stream, pos)?;
 

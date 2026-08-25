@@ -23,7 +23,7 @@ use super::{Command, Options, PackageManager, ProgressStrings, Subcommand};
 
 // ───────────────────────────── method wrappers ───────────────────────────────
 // Thin `&mut self` shims so call sites can use method-style spelling
-// (`pm.getCacheDirectory()` / `pm.getTemporaryDirectory()`). The bodies live
+// (`pm.get_cache_directory()` / `pm.get_temporary_directory()`). The bodies live
 // in the free functions below to keep them callable without an `impl` path.
 
 impl PackageManager {

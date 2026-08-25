@@ -91,8 +91,8 @@ pub enum Packages<'a> {
     Exact(&'a [PackageID]),
 }
 
-/// `RunTasksCtx` for the void-callback `runTasks` call in
-/// `populateManifestCache`.
+/// `RunTasksCtx` for the hook-less `run_tasks` call in
+/// `populate_manifest_cache`.
 struct ManifestsOnlyCtx<'a>(&'a mut PackageManager);
 impl run_tasks::RunTasksCtx for ManifestsOnlyCtx<'_> {
     fn manager(&mut self) -> &mut PackageManager {
@@ -182,9 +182,8 @@ fn fetch_manifest_if_uncached(
     Ok(())
 }
 
-/// Populate the manifest cache for packages included from `root_pkg_ids`. Only manifests of
-/// direct dependencies of the `root_pkg_ids` are populated. If `root_pkg_ids` has length 0
-/// all packages in the lockfile will have their manifests fetched if necessary.
+/// Populate the manifest cache for the packages `packages` selects (see
+/// [`Packages`]).
 pub fn populate_manifest_cache(
     manager: &mut PackageManager,
     packages: Packages<'_>,
@@ -201,7 +200,6 @@ pub fn populate_manifest_cache(
                     continue;
                 }
 
-                // `getOrPut(pkg_id).found_existing` — value is `void`, so this is a set insert.
                 if seen_pkg_ids.insert(pkg_id, ()).is_some() {
                     continue;
                 }

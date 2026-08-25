@@ -1384,9 +1384,9 @@ pub struct TaskCallbackContext {
 /// loop when a network task completes. The resolver only stores and forwards
 /// it; the fields are `Option` so `Default` is all-None.
 ///
-/// `handler`'s second parameter (`*PackageManager`) is erased to
-/// `*mut c_void` because that concrete type lives in `bun_install` (a higher
-/// tier); `bun_install::PackageManager::wake` casts at the call site.
+/// `handler`'s second parameter (historically `*PackageManager`) is an
+/// opaque `*mut c_void`; `bun_install` passes null and the runtime's handler
+/// ignores it.
 /// `on_dependency_error`'s `Dependency` parameter is *not* erased — the type
 /// lives in this crate — so callers pass the borrow directly.
 // Clone: bitwise OK — `context` is a non-owning opaque backref the runtime

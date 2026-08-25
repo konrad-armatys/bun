@@ -20,7 +20,7 @@ use ::bun_install_types::resolver_hooks as Install;
 use ::bun_install_types::resolver_hooks::{AutoInstaller, Resolution};
 use ::bun_semver as Semver;
 
-// LAYERING: `PackageManager.initWithRuntime` lives in `bun_install`, which
+// LAYERING: `PackageManager::init_with_runtime` lives in `bun_install`, which
 // depends on this crate, so the runtime registers it here at startup
 // ([`set_auto_installer_factory`]). `install` is the `?*Api.BunInstall`
 // (`self.opts.install`); `env` is the `*DotEnv.Loader`.

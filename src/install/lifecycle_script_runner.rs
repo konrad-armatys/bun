@@ -752,8 +752,8 @@ impl LifecycleScriptSubprocess {
                     if manager.finished_installing.load(Ordering::Relaxed) {
                         scripts_node.complete_one();
                     } else {
-                        // .monotonic because this is what `completeOne` does. This is the same
-                        // as `completeOne` but doesn't update the parent.
+                        // .monotonic because this is what `complete_one` does. This is the same
+                        // as `complete_one` but doesn't update the parent.
                         scripts_node
                             .unprotected_completed_items
                             .fetch_add(1, Ordering::Relaxed);

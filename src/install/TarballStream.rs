@@ -126,7 +126,7 @@ struct Source {
     /// Compressed bytes handed to libarchive by the read callback so far.
     bytes_consumed: usize,
     /// Incremental SHA over the *compressed* bytes, matching
-    /// `Integrity.verify` / `Integrity.forBytes` in the buffered path.
+    /// `Integrity::verify` / `Integrity::for_bytes` in the buffered path.
     hasher: integrity::Streaming,
 }
 
@@ -1035,7 +1035,7 @@ impl Files {
             }
             // `normalize_buf_t` collapses interior `..` but leaves a leading `..`
             // on a relative input. Reject those so `openat(dest_fd, ...)` can
-            // never escape the temp extraction root. `Archiver.extractToDir`
+            // never escape the temp extraction root. `Archiver::extract_to_dir`
             // sees the same normalised path; this check is belt-and-braces on
             // top of the integrity gate.
             if path.len() >= 2
