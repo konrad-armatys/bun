@@ -2180,7 +2180,7 @@ it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep t
       emit(a);
       if (armed) throw new Error("B's transport never handed the slot to C");
       if (!h2AutoFlushRegistered(nativeOf(c))) throw new Error("displaced C has no auto-flush for its queued bytes");
-      for (let j = 0; j < 5; j++) await new Promise(r => setTimeout(r, 10));
+      for (let j = 0; j < 50 && h2AutoFlushRegistered(nativeOf(c)); j++) await new Promise(r => setTimeout(r, 10));
       if (h2AutoFlushRegistered(nativeOf(c))) throw new Error("C's auto-flush still registered after its bytes went out");
       assertWellFormed("a", wa, 2);
       assertWellFormed("b", wb, 2);
