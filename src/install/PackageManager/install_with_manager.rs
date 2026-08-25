@@ -169,7 +169,6 @@ pub fn install_with_manager(
                 })?;
                 let mut mapping = vec![invalid_package_id; maybe_root.dependencies.len as usize]
                     .into_boxed_slice();
-                // @memset already done via vec! init
 
                 manager.summary = {
                     let updating =

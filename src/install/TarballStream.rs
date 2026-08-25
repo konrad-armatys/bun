@@ -916,7 +916,6 @@ impl Files {
             };
         let mut buf = PathBuffer::uninit();
         let tmpname = FileSystem::tmpname(tmpname_suffix, &mut buf[..], bun_core::fast_random())?;
-        // allocator.dupeZ → owned NUL-terminated copy.
         self.tmpname = ZBox::from_bytes(tmpname.as_bytes());
 
         self.dest = Some(
@@ -974,7 +973,6 @@ impl Files {
             }
             #[cfg(not(windows))]
             {
-                // bun.asByteSlice(root) — on posix OSPathChar==u8, so this is a no-op cast.
                 self.resolved_github_dirname = FileSystem::instance()
                     .dirname_store()
                     .append(root)

@@ -35,7 +35,6 @@ impl FileCopier {
             walker: {
                 let mut w = walker_skippable::walk(
                     src_dir,
-                    // bun.default_allocator → deleted (global mimalloc)
                     &[],
                     skip_dirnames,
                 )?;

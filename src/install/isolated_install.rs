@@ -1734,7 +1734,6 @@ pub(crate) fn install_isolated_packages(
     } else {
         None
     };
-    // (Drop frees global_store_path)
 
     // setup node_modules/.bun
     let is_new_bun_modules: bool = 'is_new_bun_modules: {

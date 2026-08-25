@@ -351,7 +351,6 @@ impl PatchTask {
         };
         let log = &mut patch.logger;
         bun_output::scoped_log!(InstallPatch, "apply patch task");
-        // bun.assert(this.callback == .apply) — enforced by the match above.
 
         let dir = self.project_dir;
         let patchfile_path = &patch.patchfilepath;
