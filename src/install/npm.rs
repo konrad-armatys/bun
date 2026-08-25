@@ -609,13 +609,27 @@ pub mod registry {
         /// percent-encoded, or a backslash) gets nothing: the manifest that names a
         /// tarball URL is registry-controlled.
         pub(crate) fn find<'a>(list: &'a [UrlAuth], url: &URL) -> Option<&'a Scope> {
+            UrlAuth::find_entry(list, url).map(|entry| &entry.credentials)
+        }
+
+        pub(crate) fn find_entry<'a>(list: &'a [UrlAuth], url: &URL) -> Option<&'a UrlAuth> {
             if list.is_empty() || !path_is_canonical(url.pathname) {
                 return None;
             }
             bun_ini::RegistryKey::from_parsed(url)
                 .walk()
                 .find_map(|key| list.iter().find(|entry| *entry.key == *key))
-                .map(|entry| &entry.credentials)
+        }
+
+        pub(crate) fn credentials(&self) -> &Scope {
+            &self.credentials
+        }
+
+        /// Whether this key is on `url`'s own walk, so `url` itself resolves to it.
+        pub(crate) fn applies_to(&self, url: &URL) -> bool {
+            bun_ini::RegistryKey::from_parsed(url)
+                .walk()
+                .any(|key| *self.key == *key)
         }
     }
 
