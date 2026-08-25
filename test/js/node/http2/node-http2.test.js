@@ -2150,6 +2150,42 @@ it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep t
       for (const d of [da, db, dc]) d.destroy();
     }
 
+    // (4) a displaced owner left idle: B owns the slot, A corks (flushing B), B's transport
+    // pings C once so C takes the slot first, and A displaces C. C then has queued bytes but no
+    // cork; its auto-flush must send them and retire instead of re-arming every tick.
+    for (let i = 0; i < N; i++) {
+      let a, b, c;
+      let armed = false;
+      const wa = [], wb = [], wc = [];
+      const emit = s => s.ping(Buffer.alloc(8), () => {});
+      const opts = d => ({ createConnection: () => d, maxOutstandingPings: 1e9 });
+      const da = transport(wa, () => {});
+      const db = transport(wb, () => {
+        if (armed) {
+          armed = false;
+          emit(c);
+        }
+      });
+      const dc = transport(wc, () => {});
+      a = http2.connect("http://127.0.0.1:1", opts(da));
+      b = http2.connect("http://127.0.0.1:1", opts(db));
+      c = http2.connect("http://127.0.0.1:1", opts(dc));
+      await Promise.all([a, b, c].map(connected));
+      for (const s of [a, b, c]) s.on("error", () => {});
+      await tick();
+      emit(b);
+      armed = true;
+      emit(a);
+      for (let j = 0; j < 5; j++) await new Promise(r => setTimeout(r, 10));
+      if (armed) throw new Error("B's transport never handed the slot to C");
+      assertWellFormed("a", wa, 2);
+      assertWellFormed("b", wb, 2);
+      assertWellFormed("c", wc, 2);
+      for (const s of [a, b, c]) s.destroy();
+      await tick();
+      for (const d of [da, db, dc]) d.destroy();
+    }
+
     let live = -1;
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 10));
@@ -2158,7 +2194,7 @@ it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep t
       if (live <= 0) break;
     }
     console.log(JSON.stringify({ live }));
-    process.exit(0);
+    // No process.exit(): nothing the sessions registered may keep the process alive.
   `;
   await using proc = Bun.spawn({
     cmd: [bunExe(), "-e", fixture],

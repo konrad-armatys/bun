@@ -1044,7 +1044,9 @@ pub struct H2FrameParser {
     keepalive_refs: JsCell<Vec<RefPtr<H2FrameParser>>>,
 
     pub(crate) auto_flusher: JsCell<AutoFlusher>,
-    /// Held while `auto_flusher` is registered with the deferred-task queue.
+    /// Held while `auto_flusher` is registered with the deferred-task queue. Registered ⇒ this
+    /// parser owns the cork slot, or has displaced/unsent bytes in `write_buffer`, or has a
+    /// latched transport/compression error to report.
     auto_flush_ref: Cell<Option<RefPtr<H2FrameParser>>>,
     /// Held exactly while this parser owns `CORKED_H2` (see the invariant there).
     cork_ref: Cell<Option<RefPtr<H2FrameParser>>>,
@@ -2888,7 +2890,19 @@ impl H2FrameParser {
             return false;
         }
         let _ = self.flush();
-        // we will unregister ourselves when the buffer is empty
+        // flush() unregisters through uncork() once our cork is out. A parser whose cork was
+        // displaced (`displace_cork`) stays registered only for the bytes moved to write_buffer;
+        // once those are out too, nothing is left for this task.
+        if self.auto_flusher.get().registered.get()
+            && !self.is_corked()
+            && self.write_buffer.get().len() <= self.write_buffer_offset.get()
+        {
+            self.auto_flusher.get().registered.set(false);
+            if let Some(r) = self.auto_flush_ref.take() {
+                r.deref();
+            }
+            return false;
+        }
         true
     }
 
