@@ -73,7 +73,7 @@ pub trait RunTasksCtx {
         unreachable!()
     }
 
-    // `onPackageDownloadError` is called with two distinct shapes depending
+    // `on_package_download_error` is called with two distinct shapes depending
     // on the context: `task.task_id: Task::Id` for the store installer,
     // `package_id: PackageID` otherwise.
     fn on_package_download_error_store(

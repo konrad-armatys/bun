@@ -498,7 +498,7 @@ const PRUNE_HELP_PARAMS: &[ParamType] = &[
 // per PORTING.md (no `deinit`, never `allocator.free`d). An explicit lifetime would only
 // become necessary if `clap::Args` ever becomes scoped.
 //
-// `Clone` is needed because `updatePackageJSONAndInstall`
+// `Clone` is needed because `update_package_json_and_install`
 // passes `cli` by value into `PackageManager.init` while retaining its own
 // copy.
 #[derive(Clone)]

@@ -561,7 +561,7 @@ pub fn do_patch_commit(
 
     let patches_dir: &[u8] = match &manager.options.patch_features {
         PatchFeatures::Commit { patches_dir } => patches_dir,
-        // Reaching `doPatchCommit` implies `Subcommand::PatchCommit`, which always
+        // Reaching `do_patch_commit` implies `Subcommand::PatchCommit`, which always
         // sets `patch_features = .commit` in `Options::load`.
         _ => unreachable!("patch_features must be Commit in doPatchCommit"),
     };
@@ -1080,7 +1080,7 @@ fn detach_module_folder_from_shared_store(module_folder: &[u8]) {
             // Windows directory symlinks/junctions are removed with rmdir,
             // file symlinks with unlink; on POSIX unlink covers both. If
             // removal fails the symlink is still live, and the caller's
-            // `deleteTree` + `FileCopier` would follow it into the shared
+            // `delete_tree` + `FileCopier` would follow it into the shared
             // global-store entry — so fail loudly here rather than silently
             // corrupting the cache.
             let remove_err: Option<sys::Error> = {

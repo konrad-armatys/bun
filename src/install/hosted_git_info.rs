@@ -24,7 +24,7 @@
 //! ## `HostedGitInfo`
 //!
 //! This is the main API point of this library. It encapsulates information about a Git repository.
-//! To parse URLs into this structure, use the `fromUrl` member function.
+//! To parse URLs into this structure, use the `from_url` member function.
 //!
 //! ## `HostProvider`
 //!

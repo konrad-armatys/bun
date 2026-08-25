@@ -39,7 +39,7 @@ impl FileCloner<'_> {
                     // Stale leftover (an earlier crash, or a re-run after the
                     // global-store staging directory wasn't cleaned). The
                     // global-store entry is published by an entry-level
-                    // rename in `commitGlobalStoreEntry`, so it's always safe
+                    // rename in `commit_global_store_entry`, so it's always safe
                     // to wipe and re-clone here — we're only ever writing
                     // into a per-process staging directory or a project-local
                     // path, never into a published shared directory.

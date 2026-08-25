@@ -30,7 +30,7 @@ pub struct MapEntry {
     /// `StringHashMap` boxes its own key, so keep the duped copy alive here.
     _path_storage: bun_core::ZBox,
     /// Owns the arena that backs decoded string bytes inside `root`.
-    /// `deepClone` does *not* dupe escape-decoded `E.String.data` slices.
+    /// `deep_clone` does *not* dupe escape-decoded `E.String.data` slices.
     /// The parser takes a `&Arena`, so the arena must outlive the
     /// cached AST — hold it here so it drops with the entry.
     ///
@@ -61,7 +61,7 @@ impl Default for MapEntry {
 impl MapEntry {
     /// Re-parse `self.source.contents` into `self.root`.
     ///
-    /// `updatePackageJSONAndInstall` edits a copy of `root`, prints it, and
+    /// `update_package_json_and_install` edits a copy of `root`, prints it, and
     /// writes the printed JSON back into `source.contents`. The caller then
     /// invokes this to restore the invariant `root == parse(source)`.
     pub(crate) fn reparse_root(&mut self, log: &mut Log) -> Result<(), Error> {

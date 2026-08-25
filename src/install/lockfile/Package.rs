@@ -2113,7 +2113,7 @@ impl Package<u64> {
     ) -> crate::Result<()> {
         #[allow(non_snake_case)]
         let FEATURES = features;
-        // Function-local arena for `asString` transcoding (transcoded strings
+        // Function-local arena for `as_string` transcoding (transcoded strings
         // are only borrowed until `string_builder.append` copies them).
         let bump = bun_alloc::Arena::new();
         // `--frozen-lockfile` tolerates a listed workspace that is missing on
