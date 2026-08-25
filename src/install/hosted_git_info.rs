@@ -232,7 +232,6 @@ impl HostedGitInfo {
         // git_url_mut may carry two ownership semantics:
         //  - It aliases `git_url`, in which case it must not be freed.
         //  - It actually points to a new allocation, in which case it must be freed.
-        // Modeled as a Cow-like local; Drop handles the owned case.
         let git_url_owned: Option<Box<[u8]>>;
         let mut git_url_mut: &[u8] = git_url;
 

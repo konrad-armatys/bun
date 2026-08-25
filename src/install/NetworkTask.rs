@@ -665,7 +665,7 @@ impl NetworkTask {
             )?)
         } else {
             // Owning the copy (rather than aliasing `tarball.url`)
-            // avoids a self-reference into `callback` (see `url_buf` field doc).
+            // avoids a self-reference into `callback`.
             Box::<[u8]>::from(tarball_url)
         };
         self.callback = Callback::Extract(tarball_);

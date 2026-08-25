@@ -2880,7 +2880,6 @@ impl Package<u64> {
                         if let Some(version_string) = &entry.version {
                             let external_version =
                                 string_builder.append::<ExternalString>(version_string);
-                            // allocator.free(version_string); — Drop handles it (Box<[u8]>)
                             let sliced = external_version
                                 .value
                                 .sliced(string_builder.string_bytes.as_slice());
