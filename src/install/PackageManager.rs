@@ -1901,7 +1901,7 @@ fn init_with_log(
         Output::flush();
     }
 
-    drop(workspace_names); // workspace_names.map.deinit()
+    drop(workspace_names);
 
     let mut event_loop = AnyEventLoop::init();
     {
