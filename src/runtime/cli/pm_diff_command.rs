@@ -859,17 +859,11 @@ fn registry_get(
 ) -> Result<MutableString, crate::Error> {
     let mut headers = http::HeaderBuilder::default();
     headers.count(b"Accept", accept);
-    // `dist.tarball` is registry-controlled; credentials only go back to the registry's own origin.
-    let same_origin = {
-        let registry = scope.url.url();
-        url.protocol == registry.protocol
-            && url.hostname == registry.hostname
-            && url.get_port_auto() == registry.get_port_auto()
-    };
-    let (token, auth): (&[u8], &[u8]) = if same_origin {
-        (&scope.token, &scope.auth)
-    } else {
-        (b"", b"")
+    // `dist.tarball` is registry-controlled; the same rule as `bun install` decides
+    // which credentials, if any, follow it.
+    let (token, auth): (&[u8], &[u8]) = match pm.options.tarball_credentials(scope, &url) {
+        Some(credentials) => (&credentials.token, &credentials.auth),
+        None => (b"", b""),
     };
     if !token.is_empty() {
         headers.count(b"Authorization", b"");
