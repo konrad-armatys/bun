@@ -840,6 +840,9 @@ extern "C" void Zig__GlobalObject__captureTestIsolationBaseline(Zig::GlobalObjec
         scope.assertNoException();
         JSC::JSValue value;
         while (iter->next(globalObject, value)) {
+            // require.cache's set trap forwards Symbol keys unfiltered, and ToString on a Symbol throws.
+            if (!value.isString())
+                continue;
             if (auto* str = value.toStringOrNull(globalObject))
                 baseline.preloadRequireKeys.add(str->value(globalObject));
             scope.assertNoException();
@@ -971,6 +974,9 @@ extern "C" bool Zig__GlobalObject__tryResetForTestIsolation(Zig::GlobalObject* g
         scope.assertNoException();
         JSC::JSValue value;
         while (iter->next(globalObject, value)) {
+            // require.cache's set trap forwards Symbol keys unfiltered, and ToString on a Symbol throws.
+            if (!value.isString())
+                continue;
             if (auto* str = value.toStringOrNull(globalObject)) {
                 auto view = str->view(globalObject);
                 if (isProjectPath(view) || baseline->preloadRequireKeys.contains<WTF::StringViewHashTranslator>(view))
