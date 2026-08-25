@@ -412,7 +412,6 @@ impl Stringifier {
                     workspace_sort_buf.push(pkg_id);
                 }
 
-                // local Sorter struct → closure
                 index_sort::sort_indices(&mut workspace_sort_buf, &mut |l, r| {
                     let l_res = &pkg_resolutions[l as usize];
                     let r_res = &pkg_resolutions[r as usize];

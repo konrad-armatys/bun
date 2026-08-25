@@ -173,11 +173,8 @@ bun_core::impl_tag_error!(FromExprError);
 bun_core::oom_from_alloc!(FromExprError);
 
 impl PnpmMatcher {
-    // `bun_ast::ExprData` exposes the real value-shaped enum
-    // (`EString`/`EArray` via `StoreRef<E::*>`). The arena-taking
-    // `E::String::slice` / `Expr::as_string_cloned` signatures get a local
-    // `bun_alloc::Arena` (PORTING.md §Allocators: AST=bumpalo) used only for
-    // transient UTF-16→UTF-8 transcoding inside `slice`/`string_cloned`.
+    // The local `bun_alloc::Arena` is only for transient UTF-16 to UTF-8
+    // transcoding inside `E::String::slice` / `Expr::as_string_cloned`.
     pub fn from_expr(
         expr: &ast::Expr,
         log: &mut bun_ast::Log,

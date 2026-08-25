@@ -395,7 +395,6 @@ pub fn install_with_manager(
                             let pkg_name_and_version_hash = *key;
                             debug_assert!(value.patchfile_hash_is_null);
                             let gop = lf.patched_dependencies.entry(pkg_name_and_version_hash);
-                            // ArrayHashMap get_or_put semantics → entry API approximation
                             match gop {
                                 bun_collections::array_hash_map::MapEntry::Vacant(v) => {
                                     // `PatchedDep` has private padding/hash fields,
@@ -673,10 +672,8 @@ pub fn install_with_manager(
             root_scripts.append_to_lockfile(&mut manager.lockfile);
         }
         {
-            // reshaped for borrowck — shared slices into the
-            // resolution/meta/scripts columns are held while pushing into
-            // `manager.lockfile.scripts`. Field-level split borrow keeps the two
-            // disjoint columns alive simultaneously without raw-pointer routing.
+            // Split borrow: the resolution/meta/scripts columns are read while
+            // pushing into `lockfile.scripts`.
             let lockfile = &mut *manager.lockfile;
             let packages = &lockfile.packages;
             let string_bytes = lockfile.buffers.string_bytes.as_slice();
@@ -1152,7 +1149,6 @@ fn print_summary_tree(
     // We deliberately do not disable it after this.
     Output::enable_buffering();
     let writer = Output::writer_buffered();
-    // Runtime bool → const-generic dispatch.
     let result = if Output::enable_ansi_colors_stdout() {
         LockfilePrinter::Tree::print::<_, true>(&printer, this, &mut print_state, writer, log_level)
     } else {
@@ -1353,8 +1349,6 @@ pub(crate) fn loaded_lockfile_name(load_result: &lockfile::DetachedLoadResult) -
 #[cold]
 #[inline(never)]
 fn add_dependency_error(manager: &mut PackageManager, dependency: &Dependency, err: crate::Error) {
-    // reshaped for borrowck — capture the realname slice before
-    // taking `&mut` on `manager.log`.
     let realname = dependency.realname();
     let path = manager.lockfile.str(&realname).to_vec();
     let path_fmt = bun_core::fmt::fmt_path(
@@ -1655,9 +1649,6 @@ fn workspaces_reaching_request<'a>(
 #[inline(never)]
 fn record_updating_package_versions(manager: &mut PackageManager) {
     // existing lockfile, get the original version is updating
-    // reshaped for borrowck — the lockfile is read while
-    // also mutating `manager.updating_packages`. Field-level split
-    // borrow keeps the disjoint columns alive without raw pointers.
     let lockfile: &Lockfile = &manager.lockfile;
     let updating_packages = &mut manager.updating_packages;
     let packages = lockfile.packages.slice();
@@ -2127,9 +2118,6 @@ fn write_yarn_lock_with_progress(
     manager: &mut PackageManager,
     log_level: Options::LogLevel,
 ) -> crate::Result<()> {
-    // reshaped for borrowck — `Progress::start` returns
-    // `&mut self.root`, so re-access it via `manager.progress.root` after the
-    // `&mut manager` borrow ends instead of keeping a live `&mut Node`.
     let mut node_started = false;
     if log_level.show_progress() {
         manager.progress.supports_ansi_escape_codes = Output::enable_ansi_colors_stderr();

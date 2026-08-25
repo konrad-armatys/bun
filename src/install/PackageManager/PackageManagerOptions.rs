@@ -22,9 +22,8 @@ pub enum OfflineMode {
     Offline,
 }
 
-// `string` fields are `[]const u8` borrowed from CLI args / bunfig config,
-// which live for the process lifetime. There is no `deinit` on Options. Mapped to
-// `&'static [u8]` per PORTING.md (no lifetime params on structs).
+// The `&'static [u8]` fields borrow CLI args / bunfig config, which live for
+// the process lifetime.
 
 pub struct Options {
     pub log_level: LogLevel,
@@ -928,7 +927,6 @@ impl Options {
             self.enable.set(Enable::FORCE_SAVE_LOCKFILE, false);
         }
 
-        // moved from `defer { ... }` after scope assignment (see note above).
         self.did_override_default_scope = self.scope.url_hash != *Npm::registry::DEFAULT_URL_HASH;
 
         // The manifest cache is the data source for --prefer-offline/--offline; keep it on

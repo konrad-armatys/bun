@@ -372,7 +372,6 @@ pub(crate) fn get_or_put(
         let abs_len = paths.abs.len();
         let rel_len = paths.rel.len();
         rel_buf[..rel_len].copy_from_slice(paths.rel);
-        // `paths` is dead past this point → `joined` is no longer borrowed.
         bun_paths::dangerously_convert_path_to_posix_in_place::<u8>(&mut joined[..abs_len]);
         bun_paths::dangerously_convert_path_to_posix_in_place::<u8>(&mut rel_buf[..rel_len]);
         (

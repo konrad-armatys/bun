@@ -1435,9 +1435,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
             } else {
                 TaskCallbackContext::Dependency(id)
             };
-            // reshaped for borrowck — `entry` mutably borrows
-            // `this.task_queue`; scope it tightly so the calls below can
-            // reborrow `*this`.
             {
                 let entry = this
                     .task_queue
@@ -1637,7 +1634,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
             } else {
                 TaskCallbackContext::Dependency(id)
             };
-            // reshaped for borrowck — scope `entry` tightly.
             {
                 let entry = this
                     .task_queue
@@ -2083,7 +2079,7 @@ fn get_or_put_resolved_package_with_find_result(
     // it when *every* candidate is an exact-pinned same-major sibling
     // (`uses-a-dep-1..10`). For deferred peers, suppress the satisfies-
     // fallback so only an exact `eql(find_result)` can bind here; everything
-    // else falls through to the `is_peer && !install_peer` defer below and is
+    // else falls through to the `is_peer && !install_peer` branch below and is
     // resolved deterministically by phase 2's descending-index scan in
     // `get_or_put_resolved_package`. `*` is left alone — it expresses no
     // version preference, and the "peer *" hoisting test depends on it

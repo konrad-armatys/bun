@@ -482,10 +482,7 @@ fn process_network_task(
 
                         manifest.pkg.public_max_age = timestamp_this_tick.unwrap();
 
-                        // reshaped for borrowck —
-                        // `bun_collections::HashMap` lacks `get_or_put` for
-                        // non-`Default` values, so insert by-value (overwriting
-                        // any prior entry) and reborrow.
+                        // Insert by value (overwriting any prior entry) and reborrow.
                         let name_hash = manifest.pkg.name.hash;
                         manager
                             .manifests
@@ -1144,9 +1141,6 @@ fn process_resolve_task(
                             bun_install::TaskCallbackContext::Dependency(id) => *id,
                             _ => continue,
                         };
-                        // reshaped for borrowck — copy the small `String` handles
-                        // so the `&manager.lockfile` borrow doesn't extend across
-                        // the `&mut manager` calls below.
                         let (dep_name_handle, is_required) = {
                             let dep = &manager.lockfile.buffers.dependencies[dep_id as usize];
                             (dep.name, dep.behavior.is_required())

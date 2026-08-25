@@ -421,8 +421,6 @@ pub(crate) fn load(
     }
 
     lockfile.format = FormatVersion::current();
-    // `lockfile.allocator = allocator;` dropped — global mimalloc.
-
     let _ = stream.read_all(&mut lockfile.meta_hash)?;
 
     let total_buffer_size = stream.read_int_le::<u64>()?;
@@ -568,10 +566,8 @@ pub(crate) fn load(
                     .ensure_total_capacity(overrides_name_hashes.len())?;
                 let override_versions_external: Vec<dependency::External> =
                     buffers::read_array(stream)?;
-                // reshaped for borrowck — `Context.buffer` borrows
-                // `lockfile.buffers.string_bytes` while we also need
-                // `&mut lockfile.overrides`. Split the disjoint fields up front so
-                // borrowck sees sibling borrows (no raw-ptr provenance laundering).
+                // Split borrow: `Context.buffer` borrows `buffers.string_bytes`
+                // while `overrides` is mutated.
                 let Lockfile {
                     buffers, overrides, ..
                 } = &mut *lockfile;
@@ -643,11 +639,8 @@ pub(crate) fn load(
 
                 let default_deps: Vec<dependency::External> = buffers::read_array(stream)?;
 
-                // reshaped for borrowck — `dependency::Context` /
-                // `ArrayHashContext` borrow `lockfile.buffers.string_bytes` while
-                // we also need `&mut lockfile.catalogs`. Split the disjoint
-                // fields up front so borrowck sees sibling borrows (no raw-ptr
-                // provenance laundering). `string_bytes` is not reallocated for
+                // Split borrow: the contexts borrow `buffers.string_bytes` while
+                // `catalogs` is mutated. `string_bytes` is not reallocated for
                 // the remainder of this block.
                 let Lockfile {
                     buffers, catalogs, ..

@@ -121,13 +121,13 @@ impl AnyEventLoop {
 
     /// Raw-pointer tick loop for callers whose `is_done`
     /// callback may reborrow the struct that *contains* this `AnyEventLoop`
-    /// (e.g. `bun_install::PackageManager::sleep_until`, where the closure's
-    /// `is_done` does `&mut *closure.manager` and that `PackageManager` owns
-    /// `event_loop` by value). Holding a `&mut Self` across `is_done` in that
+    /// (e.g. `bun_bundler::bundle_v2`, where `is_done` reborrows the context
+    /// that owns the loop). Holding a `&mut Self` across `is_done` in that
     /// case is UB under Stacked Borrows — the callback's whole-struct Unique
     /// retag pops the field borrow. This variant reborrows `*this`
     /// per-iteration *after* `is_done` returns, so no `&mut Self` is live
-    /// while the callback runs.
+    /// while the callback runs. Callers that can restructure should prefer
+    /// [`sleep_tick`](Self::sleep_tick) in their own loop.
     ///
     /// # Safety
     /// `this` must be valid for `&mut` access for the duration of the call,

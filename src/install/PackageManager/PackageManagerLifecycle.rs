@@ -29,12 +29,10 @@ impl PackageManager {
             return;
         }
 
-        let offset = self.preinstall_state.len();
         self.preinstall_state
             .reserve(count.saturating_sub(self.preinstall_state.len()));
         self.preinstall_state
             .resize(self.preinstall_state.capacity(), PreinstallState::Unknown);
-        let _ = offset; // resize already fills [offset..] with Unknown
     }
 
     /// A separate `lockfile` parameter would only feed `lockfile.packages.len` into

@@ -746,7 +746,6 @@ impl Step {
             6 => Step::RunPostInstallAndPrePostPrepare,
             7 => Step::Done,
             8 => Step::Blocked,
-            // Was @enumFromInt; cold atomic-load decode so the panic branch is fine.
             _ => unreachable!(),
         }
     }
@@ -1181,9 +1180,8 @@ impl Task<'_> {
                         let _ = Fd::cwd().delete_tree(staging.slice());
                     }
 
-                    // reshaped for borrowck — `defer if (cached_package_dir) |d| d.close()`
-                    // becomes a guard that *owns* the `Option<Fd>` so the loop body can reassign
-                    // through `*cached_package_dir` without an outstanding closure borrow.
+                    // The guard *owns* the `Option<Fd>` so the loop body can reassign
+                    // through `*cached_package_dir` and it is still closed on every exit.
                     let mut cached_package_dir = scopeguard::guard(None::<Fd>, |dir| {
                         if let Some(d) = dir {
                             d.close();
@@ -2587,7 +2585,6 @@ impl<'a> Installer<'a> {
         let nodes = &self.store.nodes;
         let node_pkg_ids = nodes.items_pkg_id();
         let node_dep_ids = nodes.items_dep_id();
-        // let node_peers = nodes.items().peers;
 
         let pkgs = self.lockfile().packages.slice();
         let pkg_names = pkgs.items_name();

@@ -256,7 +256,7 @@ impl ResolverContext for () {
 // `R` (six instantiations × ~49kB ≈ 292kB of identical machine code, plus a
 // duplicate `<()>` copy across CGUs). The associated consts become `&self`
 // predicates; everything else forwards 1:1. The generic `parse_with_json<R>`
-// stays as a thin shim that erases `&mut R` → `&mut dyn ResolverContextDyn`
+// stays as a thin shim that erases `&mut R` to `&mut dyn ResolverContextDyn`
 // and delegates to the non-generic `parse_with_json_impl`.
 //
 // `count`/`resolve` keep their `StringBuilder<'_>` borrow — lifetimes are
@@ -1089,7 +1089,6 @@ impl Diff {
                     break 'catalogs;
                 }
 
-                // Reshaped for borrowck — see `overrides.sort` note above.
                 lockfile::CatalogMap::sort(&mut from_lockfile.catalogs, &from_lockfile.buffers);
                 lockfile::CatalogMap::sort(&mut to_lockfile.catalogs, &to_lockfile.buffers);
 
@@ -3200,10 +3199,9 @@ pub mod serializer {
         pub needs_update: bool,
     }
 
-    // The v2-migration arm
-    // below hard-codes `u32 → u64` (`VersionedURL.migrate()` returns `<u64>`).
-    // The only caller (`bun.lockb.rs`) instantiates at `u64`, so bind concretely
-    // instead of carrying a phantom generic that can't typecheck the migrate arm.
+    // Bound to `u64`: the v2-migration arm below widens `u32` to `u64`
+    // (`VersionedURL::migrate()` returns `<u64>`), and the only caller
+    // (`bun.lockb.rs`) instantiates at `u64`.
     pub(crate) fn load(
         stream: &mut Stream,
         end: usize,

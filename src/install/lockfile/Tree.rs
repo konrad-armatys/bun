@@ -247,7 +247,6 @@ impl<'a, const PATH_STYLE: IteratorPathStyle> Iterator<'a, PATH_STYLE> {
             return None;
         }
 
-        // reshaped for borrowck — cannot mutably borrow completed_trees in loop while moved.
         let mut completed_trees = completed_trees;
 
         while trees[self.tree_id as usize].dependencies.len == 0 {
@@ -491,9 +490,6 @@ pub enum BuilderMethod {
 // types, so `manager`/`workspace_filters`/`install_root_dependencies`/`packages_to_install`
 // are `Option<_>`/empty defaults and only meaningful when `METHOD == .Filter`.
 pub struct Builder<'a, const METHOD: BuilderMethod> {
-    // No allocator field: the sole construction site is `Lockfile.hoist()`,
-    // whose allocations are persistent, not arena-scoped. Global mimalloc is
-    // correct here; no `&'bump Bump` threading needed.
     pub(crate) list: MultiArrayList<BuilderEntry>,
     pub(crate) resolutions: &'a mut [PackageID],
     pub(crate) dependencies: &'a [Dependency],
@@ -768,7 +764,6 @@ impl Tree {
             dependencies: PlacedList::default(),
         })?;
 
-        // reshaped for borrowck.
         let next_id = (builder.list.len() - 1) as Id;
         // A self-contained workspace is a hoisting barrier: nothing below it may be
         // placed above its own node_modules.
@@ -790,8 +785,7 @@ impl Tree {
         let lockfile: &Lockfile = lockfile_ref.get();
         let pkgs = lockfile.packages.slice();
         let pkg_resolutions = pkgs.items_resolution();
-        // reshaped for borrowck — copy the `&'a [Dependency]` out of
-        // `builder` so `&dependencies[i]` does not keep `builder` borrowed.
+        // Copied out of `builder` so `&dependencies[i]` does not keep `builder` borrowed.
         let dependencies: &[Dependency] = builder.dependencies;
 
         builder.sort_buf.clear();
@@ -816,8 +810,7 @@ impl Tree {
             });
         }
 
-        // reshaped for borrowck — iterate over a snapshot of sort_buf indices since
-        // builder is mutably borrowed inside the loop.
+        // By index: `builder` (which owns `sort_buf`) is mutably borrowed inside the loop.
         let sort_buf_len = builder.sort_buf.len();
         'dep: for sort_idx in 0..sort_buf_len {
             let dep_id = builder.sort_buf[sort_idx];
@@ -1049,7 +1042,6 @@ impl Tree {
             }
         }
 
-        // reshaped for borrowck — re-read `next` via index.
         let next: Tree = builder.list.items_tree()[next_id as usize];
         if next.dependencies.len == 0 {
             debug_assert!(builder.list.len() == (next.id as usize) + 1);

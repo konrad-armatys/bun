@@ -25,10 +25,8 @@ use bun_sys::{self, Fd};
 use bun_threading::{ThreadPool, thread_pool};
 use bun_url::URL;
 
-// `bun.spawn.process.WaiterThread` — the force-waiter-thread flag was moved
-// down into `bun_spawn::process` (MOVE_DOWN b0); install just flips it during
-// init. The full waiter-thread machinery (queue, signalfd, loop) lives in
-// `bun_runtime::api::bun::process` and *reads* the same flag.
+// Install only flips the force-waiter-thread flag during init; the waiter
+// thread itself (queue, signalfd, loop) lives in `bun_runtime::api::bun::process`.
 use bun_spawn::process::WaiterThread;
 
 use crate::RunCommand;
@@ -2086,10 +2084,8 @@ fn init_with_log(
             .unwrap_or_default()
     };
     // `InitOpts.abs_ca_file_name: &'static [u8]` — process-lifetime config
-    // string. Park it in
-    // `holder::ABS_CA_FILE_NAME: OnceLock<Box<[u8]>>` per PORTING.md §Forbidden
-    // (never `Box::leak` to mint `&'static`). `init()` runs once on
-    // the main thread, so `.set()` cannot race; ignore the already-set case for
+    // string kept in `holder::ABS_CA_FILE_NAME`. `init()` runs once on the
+    // main thread, so `.set()` cannot race; ignore the already-set case for
     // hot-reload re-entry (the existing CA path stays valid for the process).
     let abs_ca_file_name_static: &'static [u8] = if abs_ca_file_name.is_empty() {
         b""
@@ -2127,10 +2123,8 @@ fn init_with_log(
 
 pub(crate) fn init_with_runtime(
     log: &mut bun_ast::Log,
-    // Used read-only (`Options::load` only ever reads `config.*`).
-    // Upstream storage is `Option<NonNull<api::BunInstall>>` (bundler + resolver
-    // opts); taking `&mut` here would force a const→mut provenance launder at
-    // the resolver call site.
+    // Read-only (`Options::load` only ever reads `config.*`); the resolver
+    // holds it as `Option<NonNull<api::BunInstall>>`.
     bun_install: Option<&Api::BunInstall>,
     cli: CommandLineArguments,
     env: &mut dot_env::Loader,
@@ -2234,8 +2228,7 @@ pub(crate) fn init_with_runtime(
     {
         Ok(()) => {}
         Err(e) => {
-            // only error.OutOfMemory possible
-            let _ = e;
+            let _ = e; // only out-of-memory is possible here
             bun_core::out_of_memory();
         }
     }

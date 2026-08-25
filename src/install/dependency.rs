@@ -289,7 +289,6 @@ const SIZE: usize = core::mem::size_of::<VersionExternal>()
     + core::mem::size_of::<String>();
 
 pub struct Context<'a> {
-    // allocator dropped (global mimalloc)
     pub(crate) log: &'a mut bun_ast::Log,
     pub(crate) buffer: &'a [u8],
     pub(crate) package_manager: Option<&'a mut PackageManager>,

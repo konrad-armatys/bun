@@ -606,14 +606,11 @@ impl LifecycleScriptSubprocess {
         }
         #[cfg(windows)]
         {
-            // `spawn_process_windows` has already `heap::take`n the raw pipe
-            // pointers out of `Stdio::Buffer` into `spawned.{stdout,stderr}`
-            // as `WindowsStdioResult::Buffer(Box<uv::Pipe>)`. Take that Box
-            // out *here* (sole owner) and stash it in `source` BEFORE
-            // `start_with_current_pipe` (which reads `source.?.pipe`) and
-            // BEFORE `spawned` drops — otherwise the `Box<uv::Pipe>` is freed
-            // while libuv still has the handle queued (UAF) and the later
-            // `close_impl`→`on_pipe_close`→`heap::take` double-frees.
+            // `spawned.{stdout,stderr}` own the `Box<uv::Pipe>`s. Move each
+            // into the reader's `source` BEFORE `start_with_current_pipe`
+            // (which reads the pipe from `source`) and BEFORE `spawned` drops —
+            // otherwise the pipe is freed while libuv still has the handle
+            // queued, and the later close callback frees it again.
             if let bun_spawn::SpawnedStdio::Buffer(pipe) = spawned.stdout.take() {
                 me.remaining_fds.set(me.remaining_fds.get() + 1);
                 me.stdout.with_mut(|r| {

@@ -129,16 +129,12 @@ impl PatchTask {
             "run_owned {}",
             <&'static str>::from(&self.callback)
         );
-        // There are no early returns in the body, so the ordering
-        // (body → push → wake) is inlined below.
         match &mut self.callback {
             Callback::CalcHash(_) => {
                 let result = self.calc_hash();
                 if let Callback::CalcHash(ch) = &mut self.callback {
                     ch.result = result;
                 }
-                // Reshaped for borrowck — `calc_hash` borrows `&mut self`, so we
-                // cannot hold a `&mut ch` across the call.
             }
             Callback::Apply(_) => {
                 bun_core::handle_oom(self.apply());

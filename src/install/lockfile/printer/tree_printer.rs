@@ -60,7 +60,6 @@ where
     // `updating_packages` holds one original per name, so a name declared by several owners (or groups) is one row.
     let mut update_dedupe: HashMap<PackageNameHash, ()> = HashMap::new();
 
-    // Reshaped for borrowck — `id_map` is reborrowed per call below.
     let mut id_map = id_map;
 
     // find the updated packages
@@ -576,7 +575,6 @@ where
     W: Write,
 {
     writer.write_str("\n")?;
-    // `allocator` param dropped — global mimalloc.
     let slice = this.lockfile.packages.slice();
     let bins: &[Bin] = slice.items_bin();
     let resolved: &[Resolution] = slice.items_resolution();

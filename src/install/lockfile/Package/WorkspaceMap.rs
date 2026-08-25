@@ -83,11 +83,9 @@ impl WorkspaceMap {
     }
 
     fn insert(&mut self, key: &[u8], value: Entry) -> Result<(), bun_alloc::AllocError> {
-        // No `bun.sys.exists(key)` debug check here: `key` is
-        // relative to the workspace root while `exists` resolves against process
-        // cwd — false positive whenever the two differ (e.g. `bun unlink` from a
-        // workspace package). Existence is already verified by the caller via
-        // `process_workspace_name`, so the check is dropped.
+        // No existence check on `key`: it is relative to the workspace root,
+        // not the process cwd (e.g. `bun unlink` from a workspace package), and
+        // the caller already verified it via `process_workspace_name`.
         let entry = self.map.get_or_put(key)?;
         if !entry.found_existing {
             *entry.key_ptr = Box::<[u8]>::from(key);

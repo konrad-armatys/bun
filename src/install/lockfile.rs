@@ -1994,9 +1994,6 @@ impl Lockfile {
                     bun_core::out_of_memory();
                 }
 
-                // writer.flush() catch error.WriteFailed -> OOM
-                // (Vec<u8> writer needs no flush)
-
                 break 'bytes writer_buf;
             }
 

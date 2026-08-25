@@ -114,7 +114,6 @@ pub fn do_patch_commit(
         .root_package_id
         .get(&lockfile, manager.workspace_name_hash);
     let not_in_workspace_root = workspace_package_id != 0;
-    // reshaped for borrowck — owned buffer kept separately so `argument` can borrow it
     let mut argument_owned: Option<Box<[u8]>> = None;
     let argument: &[u8] = if arg_kind == PatchArgKind::Path
         && not_in_workspace_root
@@ -712,7 +711,6 @@ pub fn prepare_patch(manager: &mut PackageManager) -> Result<(), crate::Error> {
         .root_package_id
         .get(&manager.lockfile, workspace_name_hash);
     let not_in_workspace_root = workspace_package_id != 0;
-    // reshaped for borrowck — owned buffer kept so `argument` can borrow it.
     let argument_owned: Option<Box<[u8]>>;
     let argument: &[u8] = if arg_kind == PatchArgKind::Path
         && not_in_workspace_root
@@ -1203,11 +1201,9 @@ fn overwrite_package_in_node_modules_folder(
 
 type NodeModulesIterator<'a> = tree::Iterator<'a, { tree::IteratorPathStyle::NodeModules }>;
 
-// reshaped for borrowck — `tree::Iterator::next` returns an
-// `IteratorNext<'_>` borrowing the iterator's internal `path_buf`, so we
-// cannot return it from inside a `while let` (borrowck rejects the next
-// iteration's reborrow even though it's unreachable). Callers only need
-// `relative_path`, so copy it out into an owned `Vec<u8>`.
+// `tree::Iterator::next` returns an `IteratorNext<'_>` borrowing the
+// iterator's `path_buf`; callers only need `relative_path`, so it is copied
+// out into an owned `Vec<u8>`.
 
 fn node_modules_folder_for_dependency_ids(
     iterator: &mut NodeModulesIterator<'_>,

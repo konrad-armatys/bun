@@ -885,7 +885,6 @@ fn attempt_security_scan_with_retry(
             b"false"
         });
         new_code.extend_from_slice(&temp_source[index + suppress_placeholder.len()..]);
-        // reshaped for borrowck — drop borrow of `code` (via `temp_source`) before reassigning.
         code = new_code;
     }
 
@@ -1007,7 +1006,7 @@ impl SecurityScanSubprocess {
         // command-line length limits (>1MB), and we can't use stdin because scanners
         // may need stdin for their own setup (e.g. interactive prompts).
 
-        // fd 3 output pipe: bun.sys.pipe() + .pipe (inherit_fd) on both platforms.
+        // fd 3 output pipe: `bun_sys::pipe()`, inherited by the child on both platforms.
         let ipc_output_fds = match bun_sys::pipe() {
             Err(_) => return Err(crate::Error::IPCPipeFailed),
             Ok(fds) => fds,
@@ -1089,9 +1088,6 @@ impl SecurityScanSubprocess {
         use bun_sys::windows::libuv as uv;
 
         let me = this.get();
-        // Use the translating overlay (`ReturnCodeExt::err_enum_e`) — the inherent
-        // `ReturnCode::err_enum()` returns the raw |uv_code| (e.g. 4071 for
-        // UV_EINVAL on Windows) without mapping to POSIX `bun.sys.E`.
         let json_fds = match uv::pipe_pair(0, uv::UV_NONBLOCK_PIPE as i32) {
             Ok(fds) => fds,
             Err(rc) => {
@@ -1101,7 +1097,7 @@ impl SecurityScanSubprocess {
             }
         };
         // Track ownership with optionals: None means the fd has been transferred
-        // or closed, so the errdefer skips it. Prevents double-close on error paths
+        // or closed, so the guard skips it. Prevents double-close on error paths
         // after pipe.open() takes ownership or after the explicit closes below.
         let mut fds = scopeguard::guard(
             (
@@ -1118,7 +1114,7 @@ impl SecurityScanSubprocess {
             },
         );
 
-        // errdefer pipe.close_and_destroy(): libuv's close callback frees the
+        // On error, `close_and_destroy_pipe`: libuv's close callback frees the
         // allocation. Stays armed across `ipc_reader.start()` inside
         // finish_spawn (the pre-writer error window) so a registered-but-unowned
         // uv handle is never leaked; disarmed once the writer takes the pipe.
@@ -1203,13 +1199,13 @@ impl SecurityScanSubprocess {
         // allocation without `uv_close()` if `ipc_reader.start()` below failed,
         // leaking a registered libuv handle. Taking a thunk and calling it only
         // at the `StaticPipeWriter::create` site keeps the caller's
-        // `close_and_destroy` errdefer authoritative for the pre-writer window.
+        // `close_and_destroy_pipe` guard authoritative for the pre-writer window.
         make_json_stdio: impl FnOnce() -> StdioResult,
     ) -> Result<(), Error> {
         let me = this.get();
         // Allocate the blob copy before registering any event loop callbacks. If
-        // this fails, nothing is registered yet and the caller's defer can safely
-        // destroy the struct.
+        // this fails, nothing is registered yet and the caller can safely drop
+        // the struct.
         let json_data_copy = Box::<[u8]>::from(&*me.json_data);
         let json_source = subprocess::Source::from_owned_bytes(json_data_copy);
 

@@ -146,11 +146,10 @@ fn update_package_json_and_install_with_manager_with_updates_and_update_requests
 ) -> Result<(), Error> {
     let subcommand = manager.subcommand;
     if subcommand != Subcommand::PatchCommit && subcommand != Subcommand::Patch {
-        // reshaped for borrowck — `parse` returns a `&mut [UpdateRequest]`
-        // sub-slice of `update_requests`; we take its length and truncate the Vec so
-        // the next call can take the Vec by value.
-        // `dependency::parse_with_tag` is the only consumer of `pm`; it inserts
-        // into `pm.known_npm_aliases` for `npm:`-aliased positionals.
+        // `parse` returns a `&mut [UpdateRequest]` prefix of `update_requests`;
+        // take its length and truncate the Vec so it can be passed on by value.
+        // The manager is only needed for `known_npm_aliases` (`npm:`-aliased
+        // positionals).
         let len = manager.with_log(|manager, log| {
             UpdateRequest::parse(Some(manager), log, positionals, update_requests, subcommand).len()
         });
@@ -170,10 +169,7 @@ fn update_package_json_and_install_with_manager_with_updates_and_update_requests
 fn update_package_json_and_install_with_manager_with_updates(
     manager: &mut PackageManager,
     ctx: Command::Context,
-    // reshaped for borrowck — taking by
-    // value lets us hand ownership to `manager.update_requests` (typed
-    // `Box<[UpdateRequest]>`) and re-borrow afterwards without
-    // aliasing `&mut manager`.
+    // By value: ownership moves into `manager.update_requests`.
     mut updates: Vec<UpdateRequest>,
     subcommand: Subcommand,
     original_cwd: &[u8],

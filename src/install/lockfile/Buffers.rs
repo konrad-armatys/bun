@@ -451,7 +451,6 @@ pub(crate) fn load(
     let string_buf = this.string_bytes.as_slice();
     let mut extern_context = dependency::Context {
         log,
-        // allocator dropped — global mimalloc
         buffer: string_buf,
         package_manager: pm_,
     };

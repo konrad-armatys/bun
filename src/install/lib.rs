@@ -2,12 +2,9 @@
 #![feature(adt_const_params)]
 
 // ──────────────────────────────────────────────────────────────────────────
-// Crate aliases — Phase-A drafts use the porting-doc crate names; map them
-// to the real workspace crates here so module bodies stay diff-minimal.
+// Crate aliases: module bodies name these crates by their short names, and
+// `bun_install::…` paths resolve from inside the crate.
 // ──────────────────────────────────────────────────────────────────────────
-// Self-alias so Phase-A drafts written against `bun_install::…` resolve
-// without rewriting every `use` (e.g. yarn.rs, extract_tarball.rs,
-// lifecycle_script_runner.rs).
 extern crate bun_sha_hmac as bun_sha;
 extern crate self as bun_install;
 // `bun_output::declare_scope!` / `scoped_log!` — the macros live at
@@ -449,9 +446,8 @@ impl RunCommand {
     /// Returns a slice into a process-lifetime static buffer (includes trailing NUL).
     #[cfg(not(windows))]
     pub(crate) fn find_shell(path: &[u8], cwd: &[u8]) -> Option<&'static [u8]> {
-        // PORTING.md §Concurrency: `bun.once` + static buf → OnceLock. Store the
-        // result bytes (including NUL) directly in the OnceLock so the borrow is
-        // trivially `'static` — avoids the Mutex+data_ptr dance from the draft.
+        // The result bytes (including NUL) live in the OnceLock, so the borrow
+        // is trivially `'static`.
         static ONCE: std::sync::OnceLock<Option<Vec<u8>>> = std::sync::OnceLock::new();
 
         ONCE.get_or_init(|| {
@@ -847,7 +843,7 @@ pub(crate) fn initialize_mini_store() {
         memory_store: bun_ast::ASTMemoryAllocator,
     }
 
-    // Per-thread and never freed (the AST allocator hooks keep pointing at it).
+    // Per-thread and never freed (the AST allocation hooks keep pointing at it).
     thread_local! {
         static INSTANCE: core::cell::RefCell<Option<&'static mut MiniStore>> =
             const { core::cell::RefCell::new(None) };

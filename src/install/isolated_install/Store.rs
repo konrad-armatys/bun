@@ -184,7 +184,6 @@ impl<T> OrderedArraySet<T> {
     const EMPTY: Self = Self { list: Vec::new() };
 
     pub(crate) fn init_capacity(n: usize) -> Result<Self, AllocError> {
-        // allocator param dropped — global mimalloc
         Ok(Self {
             list: Vec::with_capacity(n),
         })
@@ -220,7 +219,6 @@ impl<T: Copy> OrderedArraySet<T> {
         new: T,
         ctx: &impl OrderedArraySetCtx<T>,
     ) -> Result<(), AllocError> {
-        // allocator param dropped — global mimalloc
         for i in 0..self.list.len() {
             let existing = self.list[i];
             if ctx.eql(new, existing) {
@@ -290,11 +288,9 @@ pub mod entry {
         /// (root, workspace, folder, symlink, patched).
         pub entry_hash: u64,
 
-        // `Cell` because `Installer::Task::run` writes this slot
-        // from a task thread through `&Store` (each Task is the sole writer for
-        // its own `entry_id`; see Installer.rs). Without interior
-        // mutability the only access path is `&Store → &[Option<_>]` and the
-        // per-entry write would mutate through shared-reference provenance.
+        // `Cell` because `Installer::Task::run` writes this slot from a task
+        // thread through `&Store` (each Task is the sole writer for its own
+        // `entry_id`; see Installer.rs).
         // Reads `take()` the box and `set()` it back; each entry's slot has a
         // single owner at a time (its task, or the main thread while that task
         // is parked), so the slot is never observed empty by anyone else.

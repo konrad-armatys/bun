@@ -154,10 +154,8 @@ impl WorkspacePackageJSONCache {
             &buf[..abs_package_json_path.len()]
         };
 
-        // reshaped for borrowck — we cannot hold an entry borrow across
-        // `self.map.remove`, so check
-        // membership up front and only insert into the map after a successful
-        // read+parse. Net map state is identical on every path.
+        // Membership is checked up front and the map only gains an entry after
+        // a successful read+parse.
         if self.map.contains_key(path) {
             let entry = self.map.get_mut(path).unwrap();
             if opts.guess_indentation && !entry.indentation_guessed {
@@ -174,8 +172,6 @@ impl WorkspacePackageJSONCache {
         // `value.path_storage` below).
         let key = bun_core::ZBox::from_bytes(path);
 
-        // MOVE_DOWN: `bun.sys.File.to_source` lives in `bun_logger` (T1 → T2
-        // cyclebreak; `bun_sys` cannot name `Source`).
         let source = match bun_ast::to_source(&key, Default::default()) {
             Ok(s) => s,
             Err(err) => {

@@ -962,8 +962,8 @@ impl<'a> Linker<'a> {
 
         // We have to do an atomic replace here, use a randomly generated
         // filename in the same folder, read the entire original file
-        // contents using bun.sys.File.read_from, then write the temporary file, then
-        // overwite the old one with the new one via bun.sys.renameat. And
+        // contents using `File::read_from`, then write the temporary file, then
+        // overwite the old one with the new one via `renameat`. And
         // always unlink the old one. If it fails for any reason then exit
         // early.
         let mut tmpname_buf = [0u8; 1024];
@@ -980,8 +980,6 @@ impl<'a> Linker<'a> {
             return;
         }
 
-        // reshaped for borrowck — bind the owned buffer first, then
-        // borrow `content` from it (or fall back to the stack `chunk`).
         let content_to_free: Box<[u8]>;
         let content: &[u8] = if chunk.len() >= shebang_buf.len() {
             // Partial read. Need to read the rest of the file.
@@ -1219,9 +1217,8 @@ impl<'a> Linker<'a> {
 
     #[cfg(not(windows))]
     fn create_symlink(&mut self, abs_target: &ZStr, abs_dest: &ZStr, global: bool) {
-        // hoisted from `defer { if (this.err == null) chmod }` — scopeguard
-        // cannot capture `&mut self.err` without conflicting with the body's writes,
-        // so each return path calls `Self::chmod_on_ok` explicitly instead.
+        // Each return path calls `Self::chmod_on_ok` explicitly (a guard
+        // could not capture `&mut self.err` alongside the body's writes).
 
         let abs_dest_dir = resolve_path::dirname::<PlatformAuto>(abs_dest.as_bytes());
         let rel_target =
@@ -1285,7 +1282,6 @@ impl<'a> Linker<'a> {
 
     #[cfg(not(windows))]
     fn chmod_on_ok(err: Option<Error>, abs_target: &ZStr) {
-        // hoisted from `defer` block in create_symlink
         if err.is_none() {
             let mode = 0o777 & !(UMASK.load(Ordering::Acquire) as Mode);
             let _ = sys::lchmod(abs_target, mode);
@@ -1490,7 +1486,6 @@ impl<'a> Linker<'a> {
             return None;
         }
 
-        // reshaped for borrowck — track offset instead of remain.ptr arithmetic
         let mut off: usize = 0;
 
         buf[off..off + dest_dir_without_trailing_slash.len()]

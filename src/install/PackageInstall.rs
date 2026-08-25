@@ -137,7 +137,6 @@ impl Method {
             2 => Method::Hardlink,
             3 => Method::Copyfile,
             4 => Method::Symlink,
-            // Was @enumFromInt; cold atomic-load decode so the panic branch is fine.
             _ => unreachable!(),
         }
     }
@@ -288,13 +287,10 @@ impl Step {
     }
 }
 
-// PORTING.md §Global mutable state: install-main-thread enum. `RacyCell`
-// (no `Atomic<Method>`) — writers are the CLI option-load and the
-// clonefile/hardlink fallback while installing, all on the install
-// main thread; isolated_install workers snapshot via `supported_method()`
-// once at startup. Stored as the `repr(u8)` discriminant so reads/writes are
-// lock-free atomics (S015: AtomicU8 instead of RacyCell — single-writer path
-// so `Relaxed` adds no contention).
+// Writers are the CLI option-load and the clonefile/hardlink fallback while
+// installing, all on the install main thread; isolated_install workers
+// snapshot via `supported_method()` once at startup. Stored as the `repr(u8)`
+// discriminant; single writer, so `Relaxed` suffices.
 pub(crate) static SUPPORTED_METHOD: AtomicU8 = AtomicU8::new(if cfg!(target_os = "macos") {
     Method::Clonefile as u8
 } else {
@@ -870,7 +866,6 @@ impl<'a> PackageInstall<'a> {
             total += read;
 
             mutable.expand_to_capacity();
-            // Reshaped for borrowck — recompute remain after grow.
             remain = &mut mutable.list[total..];
 
             if remain.len() < 1024 {

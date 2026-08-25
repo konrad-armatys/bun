@@ -440,7 +440,6 @@ impl<'a> PackageInstaller<'a> {
             let mut link_target_buf = PathBuffer::uninit();
             let mut link_dest_buf = PathBuffer::uninit();
             let mut link_rel_buf = PathBuffer::uninit();
-            // reshaped for borrowck — pass tree_id, re-borrow tree inside.
             self.link_tree_bins(
                 tree_id,
                 true,
@@ -674,7 +673,6 @@ impl<'a> PackageInstaller<'a> {
 
         let trees_len = self.trees.len();
         for tree_id in 0..trees_len {
-            // reshaped for borrowck — index instead of `for (self.trees, 0..) |*tree, tree_id|`.
             if !self.trees[tree_id].binaries.is_empty() {
                 self.seen_bin_links.clear();
                 self.node_modules.path.truncate(
@@ -719,8 +717,7 @@ impl<'a> PackageInstaller<'a> {
             let optional = self.pending_lifecycle_scripts[i].optional;
             if self.can_run_scripts(tree_id) {
                 let entry = self.pending_lifecycle_scripts.swap_remove(i);
-                // reshaped for borrowck — `package_name` is `Box<[u8]>`;
-                // clone it for the error message since `entry.list` is moved into `spawn`.
+                // Cloned for the error message; `entry.list` is moved into the spawn.
                 let name: Box<[u8]> = entry.list.package_name.clone();
                 let output_in_foreground = false;
 
@@ -783,7 +780,6 @@ impl<'a> PackageInstaller<'a> {
 
         let trees_len = self.trees.len();
         for i in 0..trees_len {
-            // reshaped for borrowck — index instead of iter_mut.
             if FORCE
                 || Self::can_install_package_for_tree(
                     &self.completed_trees,
@@ -834,8 +830,6 @@ impl<'a> PackageInstaller<'a> {
     }
 
     pub(crate) fn complete_remaining_scripts(&mut self, log_level: Options::LogLevel) {
-        // reshaped for borrowck — drain by move since loop body needs `&mut
-        // self.manager` and `spawn_package_lifecycle_scripts` consumes the list.
         for entry in core::mem::take(&mut self.pending_lifecycle_scripts) {
             let package_name: Box<[u8]> = entry.list.package_name.clone();
             // .monotonic is okay because this value isn't modified from any other thread.

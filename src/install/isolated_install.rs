@@ -57,8 +57,7 @@ use store::{Entry as StoreEntry, EntryColumns as _, Node as StoreNode, NodeColum
 bun_output::define_scoped_log!(log, IsolatedInstall, visible);
 
 // ───────────────────────────────────────────────────────────────────────────
-// Inner helper types (hoisted from fn body — Rust does not allow local
-// struct decls that borrow outer locals via closures the same way).
+// Helper types for `build_store`
 // ───────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
@@ -644,8 +643,7 @@ pub(crate) fn build_store(
                         string_buf,
                         pkg_names,
                     };
-                    // Reshaped for borrowck — clone the dedupe peers slice
-                    // before mutating node_peers.
+                    // Cloned: `node_peers` is mutated below.
                     let dedupe_peers: Vec<_> =
                         node_peers[dedupe_node_id.get() as usize].list.clone();
                     for peer in dedupe_peers {
@@ -1279,8 +1277,7 @@ pub(crate) fn install_isolated_packages(
 
                 while !stack.is_empty() {
                     let top_idx = stack.len() - 1;
-                    // Reshaped for borrowck — re-borrow `top` after each
-                    // potential `stack.push()` realloc.
+                    // Re-read `top` by index after each potential `stack.push()`.
                     let id = stack[top_idx].id;
                     let entry_idx = id.get() as usize;
 
@@ -1545,8 +1542,7 @@ pub(crate) fn install_isolated_packages(
                                 }
                                 unreachable!();
                             };
-                            // Reshaped for borrowck — copy members to
-                            // avoid holding a borrow into scc_stack while mutating.
+                            // Copied: `scc_stack` is mutated while walking the members.
                             let members: Vec<u32> = scc_stack[start..].to_vec();
                             for &m in &members {
                                 on_stack[m as usize] = false;
@@ -1841,8 +1837,6 @@ pub(crate) fn install_isolated_packages(
 
                         workspace_node_modules.append(b"node_modules").assume_ok();
 
-                        // Reshaped for borrowck — capture length instead
-                        // of `save()` so `rename_path` stays unborrowed.
                         let rename_path_save = rename_path.len();
                         rename_path
                             .append_fmt(format_args!(".old_{}_modules", BStr::new(&basename)))
@@ -2454,7 +2448,6 @@ pub(crate) fn install_isolated_packages(
                                     continue;
                                 }
                                 Err(err) => {
-                                    // error.InvalidURL
                                     let (name, res) = describe(&installer);
                                     Output::err(
                                         err,

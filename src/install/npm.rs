@@ -508,9 +508,8 @@ pub mod registry {
             let final_href: Box<[u8]> = if needs_normalize {
                 url.href_without_auth()
             } else {
-                // reshaped for borrowck — `url` (borrowing
-                // `registry_url`) is dead on this branch (every path that
-                // mutated `url.pathname` also set `needs_normalize = true`).
+                // `url` is dead on this branch (every path that mutated
+                // `url.pathname` also set `needs_normalize = true`).
                 registry_url
             };
 
@@ -637,8 +636,7 @@ pub(crate) fn negatable_from_json<T: NegatableEnum>(expr: &JSON::Expr) -> Result
     let mut this = T::NONE.negatable();
     if let JSON::ExprData::EArray(a) = &expr.data {
         for item in a.items.slice() {
-            // JSON parsed via `parse_utf8` always yields UTF-8 EStrings,
-            // so no transcode allocator is needed.
+            // JSON parsed via `parse_utf8` always yields UTF-8 EStrings.
             if let Some(value) = item.as_utf8_string_literal() {
                 this.apply(value);
             }
@@ -1973,15 +1971,12 @@ impl PackageManifest {
         public_max_age: u32,
         is_extended_manifest: bool,
     ) -> Result<Option<PackageManifest>, Error> {
-        // `bun_ast::Source::init_path_string` accepts borrowed `&[u8]` via
-        // `IntoStr`; the Source only lives for the duration of this function,
-        // so pass the caller's buffers through directly without manufacturing
-        // `'static` references here (PORTING.md §Forbidden lifetime extension).
+        // The Source only lives for the duration of this function and borrows
+        // the caller's buffers.
         let source = bun_ast::Source::init_path_string(expected_name, json_buffer);
         initialize_store();
-        // `initialize_mini_store` deliberately keeps the allocator pushed
-        // across calls (the AstAlloc state stays installed for the re-arm) and
-        // bulk-frees via `reset_retain_with_limit` on the next call — see
+        // `initialize_mini_store` keeps the AST store installed across calls
+        // and bulk-frees via `reset_retain_with_limit` on the next call — see
         // `initialize_mini_store` in lib.rs for why.
         let parsed = match JSON::ParsedJson::parse_npm_manifest(&source, log) {
             Ok(j) => j,
@@ -2600,7 +2595,6 @@ impl PackageManifest {
                     let has_meta_only_peers =
                         peer_deps_meta.is_some_and(|meta| !meta.properties().is_empty());
                     if items.len() > 0 || has_meta_only_peers {
-                        // reshaped for borrowck — index into all_extern_strings / version_extern_strings
                         let names_base = dependency_names_cursor;
                         let values_base = dependency_values_cursor;
 
