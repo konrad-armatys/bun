@@ -71,14 +71,17 @@ pub unsafe trait OwnedTask: IntrusiveWorkTask + Send + 'static {
 /// [`ThreadPool::schedule_arc`](crate::ThreadPool::schedule_arc) hands one
 /// reference to the pool and the callback turns it back into the `Arc` for
 /// [`run`](ArcTask::run). The embedded [`SharedTask`](crate::SharedTask) is
-/// a single queue node: scheduling a value that is already queued or running
-/// is a no-op (the reference is dropped).
+/// a single queue node: scheduling a value that is already queued (not yet
+/// dequeued by a worker) is a no-op (the reference is dropped). The node is
+/// released before `run` is called, so a value scheduled again while its
+/// `run` is in progress runs again, possibly overlapping the first.
 ///
 /// # Safety
 /// [`run`](ArcTask::run) executes on an arbitrary worker thread while other
-/// threads may hold the `Arc`: everything `run` touches must be synchronized
-/// with them, whether or not the type is `Send`/`Sync`. Prefer
-/// [`arc_task!`](crate::arc_task), which states that at the type.
+/// threads may hold the `Arc`, and may overlap another `run` of the same
+/// value: everything `run` touches must be synchronized with them, whether
+/// or not the type is `Send`/`Sync`. Prefer [`arc_task!`](crate::arc_task),
+/// which states that at the type.
 pub unsafe trait ArcTask: Sized + 'static {
     fn run(self: std::sync::Arc<Self>);
 

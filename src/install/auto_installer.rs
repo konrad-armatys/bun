@@ -21,6 +21,7 @@
 //! `value` union by plain assignment.
 
 use core::mem::{align_of, size_of};
+use core::ptr::NonNull;
 
 use bun_install_types::resolver_hooks as hooks;
 use bun_semver::{SlicedString, String as SemverString};
@@ -441,26 +442,42 @@ pub fn init_for_resolver(
     log: &mut bun_ast::Log,
     bun_install: Option<&crate::bun_schema::api::BunInstall>,
     env: &mut bun_dotenv::Loader,
-) -> core::result::Result<&'static mut dyn hooks::AutoInstaller, bun_errno::SystemErrno> {
-    // Idempotent.
-    bun_http::http_thread::init(&Default::default());
+) -> core::result::Result<NonNull<dyn hooks::AutoInstaller>, bun_errno::SystemErrno> {
+    /// Address of the leaked runtime package manager.
+    struct Published(NonNull<PackageManager>);
+    // SAFETY: an address only; whoever dereferences it upholds the manager's
+    // threading rules (see `Resolver::get_package_manager`).
+    unsafe impl Send for Published {}
+    // SAFETY: as above.
+    unsafe impl Sync for Published {}
+    static RUNTIME_MANAGER: std::sync::OnceLock<Result<Published, crate::Error>> =
+        std::sync::OnceLock::new();
 
-    let pm: &'static mut PackageManager = crate::package_manager::init_with_runtime(
-        log,
-        bun_install,
-        crate::package_manager::CommandLineArguments::default(),
-        env,
-    )
-    .map_err(|e| match e {
-        crate::Error::Sys(errno) => errno,
-        crate::Error::Resolver(bun_resolver::Error::Sys(errno)) => errno,
-        other => {
-            log.add_zig_error_with_note(
-                other.name(),
-                format_args!("while initializing the auto-install package manager"),
-            );
-            bun_errno::SystemErrno::EIO
+    let result = RUNTIME_MANAGER.get_or_init(|| {
+        bun_http::http_thread::init(&Default::default());
+        crate::package_manager::init_with_runtime(
+            log,
+            bun_install,
+            crate::package_manager::CommandLineArguments::default(),
+            env,
+        )
+        .map(|pm| Published(NonNull::from(pm)))
+    });
+    match result {
+        Ok(Published(pm)) => {
+            let pm: NonNull<dyn hooks::AutoInstaller> = *pm;
+            Ok(pm)
         }
-    })?;
-    Ok(pm)
+        Err(err) => Err(match *err {
+            crate::Error::Sys(errno) => errno,
+            crate::Error::Resolver(bun_resolver::Error::Sys(errno)) => errno,
+            other => {
+                log.add_zig_error_with_note(
+                    other.name(),
+                    format_args!("while initializing the auto-install package manager"),
+                );
+                bun_errno::SystemErrno::EIO
+            }
+        }),
+    }
 }

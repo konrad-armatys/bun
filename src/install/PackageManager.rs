@@ -2140,7 +2140,7 @@ pub(crate) fn init_with_runtime(
     cli: CommandLineArguments,
     env: &mut dot_env::Loader,
 ) -> crate::Result<&'static mut PackageManager> {
-    // The resolver calls this at most once per process (it caches the result).
+    // `auto_installer::init_for_resolver` calls this at most once per process.
     if env.get(b"BUN_INSTALL_VERBOSE").is_some() {
         PackageManager::set_verbose_install(true);
     }

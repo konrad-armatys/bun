@@ -57,12 +57,14 @@ impl SharedTask {
 }
 
 /// One unit of work in a [`TaskSlots`]. `run` executes on a worker thread
-/// while the scheduling thread keeps `&Self`.
+/// while the scheduling thread keeps `&Self`; a slot scheduled again while
+/// its `run` is in progress runs again, possibly overlapping the first.
 ///
 /// # Safety
 /// `run` may only touch state that is synchronized with every other holder
-/// of `&Self` (the value is shared across threads for the run even if it is
-/// not `Sync`). [`slot_task!`](crate::slot_task) states that at the type.
+/// of `&Self` and with an overlapping `run` of the same slot (the value is
+/// shared across threads for the run even if it is not `Sync`).
+/// [`slot_task!`](crate::slot_task) states that at the type.
 pub unsafe trait SlotTask: Sized {
     fn run(&self);
 }

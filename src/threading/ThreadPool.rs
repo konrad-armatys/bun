@@ -466,7 +466,8 @@ impl Batch {
 
     /// One reference to an [`ArcTask`](crate::work_pool::ArcTask); the pool
     /// gives it back to `T::run` when the task runs. A value that is already
-    /// queued or running is not queued again (the reference is dropped).
+    /// queued (not yet dequeued by a worker) is not queued again (the
+    /// reference is dropped); one whose `run` is in progress is.
     pub fn push_arc<T: crate::work_pool::ArcTask>(&mut self, task: std::sync::Arc<T>) {
         if task.shared_task().try_queue(T::__callback).is_none() {
             return;
@@ -679,7 +680,6 @@ impl ThreadPool {
         self.force_spawn();
     }
 
-    /// Schedule a batch of tasks to be executed by some thread on the thread pool.
     /// [`Batch::push_owned`] + [`schedule`](Self::schedule) for one task.
     pub fn schedule_owned<T: crate::work_pool::OwnedTask>(&self, task: Box<T>) {
         let mut batch = Batch::default();
@@ -694,6 +694,7 @@ impl ThreadPool {
         self.schedule(batch);
     }
 
+    /// Schedule a batch of tasks to be executed by some thread on the thread pool.
     pub fn schedule(&self, batch: Batch) {
         self.schedule_impl(&batch, false);
     }

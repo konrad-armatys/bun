@@ -24,14 +24,15 @@ use ::bun_semver as Semver;
 // depends on this crate, so the runtime registers it here at startup
 // ([`set_auto_installer_factory`]). `install` is the `?*Api.BunInstall`
 // (`self.opts.install`); `env` is the `*DotEnv.Loader`.
-/// Builds (once per call site) the auto-install package manager. Errs when
-/// the one-time init fails (e.g. the top-level directory is unreadable).
+/// Returns the process-wide auto-install package manager, creating it on the
+/// first call from any resolver. A failed first attempt is remembered and
+/// returned to every later caller (e.g. the top-level directory is unreadable).
 pub type AutoInstallerFactory =
     fn(
         log: &mut bun_ast::Log,
         install: Option<&bun_options_types::schema::api::BunInstall>,
         env: &mut bun_dotenv::Loader,
-    ) -> core::result::Result<&'static mut dyn AutoInstaller, bun_errno::SystemErrno>;
+    ) -> core::result::Result<NonNull<dyn AutoInstaller>, bun_errno::SystemErrno>;
 
 static AUTO_INSTALLER_FACTORY: std::sync::OnceLock<AutoInstallerFactory> =
     std::sync::OnceLock::new();
@@ -814,19 +815,16 @@ impl<'a> Resolver<'a> {
         unsafe { &mut *self.dir_cache }
     }
 
-    /// Lazily initializing
-    /// `PackageManager.initWithRuntime` here directly would
-    /// be a `bun_resolver → bun_install` cycle, so the lazy init is
-    /// dispatched through the registered [`AutoInstallerFactory`]
-    /// (`bun_install::auto_installer::init_for_resolver`). The factory performs
-    /// `HTTPThread.init` + `PackageManager.initWithRuntime` and returns the
-    /// process-static singleton as a `dyn AutoInstaller`. We then wire
-    /// `on_wake` and cache the pointer. Reached from
-    /// the auto-install path (`load_node_modules` global-cache block) when
-    /// [`use_package_manager`] is `true`. Errs (without caching, but sticky
-    /// inside the factory) when the one-time init fails, e.g. the top-level
-    /// directory was deleted or is unreadable — callers surface that as a
-    /// resolve failure rather than panicking.
+    /// The process-wide auto-install package manager, through the registered
+    /// [`AutoInstallerFactory`] (`bun_install::auto_installer::init_for_resolver`,
+    /// which creates it once per process and hands every resolver the same
+    /// one; naming `PackageManager` here would be a `bun_resolver →
+    /// bun_install` cycle). This resolver's `on_wake` is installed and the
+    /// pointer cached per resolver. Reached from the auto-install path
+    /// (`load_node_modules` global-cache block) when [`use_package_manager`]
+    /// is `true`. A failed first init (e.g. the top-level directory was
+    /// deleted or is unreadable) is sticky: every caller gets the error and
+    /// surfaces it as a resolve failure rather than panicking.
     pub fn get_package_manager(&mut self) -> crate::CrateResult<*mut dyn AutoInstaller> {
         if let Some(pm) = self.package_manager {
             return Ok(pm.as_ptr());
@@ -842,15 +840,16 @@ impl<'a> Resolver<'a> {
         // process-lifetime storage (Transpiler-owned) with no other `&mut`
         // live across this call. The returned pointer names the leaked
         // `PackageManager` (`'static`).
-        let pm: &'static mut dyn AutoInstaller = unsafe {
+        let pm: NonNull<dyn AutoInstaller> = unsafe {
             factory(
                 log.as_mut(),
                 self.opts.install.map(|p| &*p.as_ptr()),
                 env.as_mut(),
             )
         }?;
-        pm.set_on_wake(self.on_wake_package_manager);
-        let pm = NonNull::from(pm);
+        // SAFETY: the leaked process singleton; resolvers run on the thread
+        // that owns it while they hold this borrow.
+        unsafe { (*pm.as_ptr()).set_on_wake(self.on_wake_package_manager) };
         self.package_manager = Some(pm);
         Ok(pm.as_ptr())
     }
