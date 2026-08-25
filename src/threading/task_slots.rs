@@ -71,7 +71,8 @@ pub unsafe trait SlotTask: Sized {
 
 /// Implements [`SlotTask`] by forwarding to an inherent `fn run_slot(&self)`,
 /// the type's worker-thread entry point: it must only touch state
-/// synchronized with the scheduling thread.
+/// synchronized with the scheduling thread and with an overlapping `run_slot`
+/// of the same value (a slot can be claimed again as soon as its run starts).
 #[macro_export]
 macro_rules! slot_task {
     ([$($gen:tt)*] $ty:ty) => {

@@ -108,7 +108,8 @@ pub unsafe trait ArcTask: Sized + 'static {
 /// and is scheduled via [`ThreadPool::schedule_arc`](crate::ThreadPool::schedule_arc);
 /// the implementor supplies an inherent `fn run_arc(self: Arc<Self>)`, the
 /// type's worker-thread entry point: it must only touch state synchronized
-/// with the other holders of the `Arc`.
+/// with the other holders of the `Arc` and with an overlapping `run_arc` of the
+/// same value (it can be scheduled again as soon as a run starts).
 #[macro_export]
 macro_rules! arc_task {
     ($ty:ty, $field:ident) => {

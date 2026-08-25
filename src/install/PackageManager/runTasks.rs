@@ -126,7 +126,6 @@ pub trait RunTasksCtx {
         unreachable!()
     }
 
-    /// `Store::Installer` only: drain the finished isolated-install tasks.
     /// A lifecycle script run for a store entry finished (isolated installs).
     fn on_lifecycle_script_event(
         &mut self,
@@ -137,6 +136,7 @@ pub trait RunTasksCtx {
         unreachable!("lifecycle script with a store entry outside the isolated installer");
     }
 
+    /// `Store::Installer` only: drain the finished isolated-install tasks.
     fn drain_store_tasks(&mut self, _log_level: Options::LogLevel) {
         unreachable!()
     }

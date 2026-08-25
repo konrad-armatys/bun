@@ -328,7 +328,7 @@ impl Queue {
     }
 
     /// `WakeHandler::handler` — runs on install / HTTP-callback threads
-    /// (`PackageManager::wake_raw`). `ctx` is the [`WakeContext`] registered in
+    /// (`PackageManager`'s `Shared::wake`). `ctx` is the [`WakeContext`] registered in
     /// `runtime/jsc_hooks.rs`; the VM is reached only through its handle.
     pub fn on_wake_handler(ctx: *mut c_void, _: *mut c_void) {
         bun_core::scoped_log!(AsyncModule, "onWake");

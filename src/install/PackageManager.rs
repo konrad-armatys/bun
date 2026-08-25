@@ -702,7 +702,7 @@ pub enum TrackInstalledBin {
 // MOVE_DOWN: data struct + accessors live in `bun_install_types::WakeHandler`
 // (single definition the resolver also stores). The `handler` second arg is
 // erased to `*mut c_void` there because that crate cannot name
-// `PackageManager`; `wake_raw()` casts it back at the call site.
+// `PackageManager`; `Shared::wake` passes null and the runtime handler ignores it.
 pub use bun_install_types::resolver_hooks::WakeHandler;
 
 // ──────────────────────────────────────────────────────────────────────────
