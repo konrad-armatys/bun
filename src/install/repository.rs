@@ -1061,10 +1061,8 @@ impl<'a> fmt::Display for StorePathFormatter<'a> {
                 "{}",
                 self.repo.owner.fmt_store_path(self.string_buf)
             )?;
-            // try writer.write_byte(if (this.opts.replace_slashes) '+' else '/');
             writer.write_str("+")?;
         } else if Dependency::is_scp_like_path(self.repo.repo.slice(self.string_buf)) {
-            // try writer.print("ssh:{s}", .{if (this.opts.replace_slashes) "++" else "//"});
             writer.write_str("ssh++")?;
         }
 

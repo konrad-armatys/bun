@@ -800,10 +800,6 @@ impl<'a> StorePathFormatter<'a> {
     /// verbatim (mapping `/` and `\` to `+`). This is the byte-faithful sink; callers that
     /// need an on-disk store path (legal non-UTF-8 on Linux) must use this, not `Display`.
     pub(crate) fn write_to<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
-        // if (!this.opts.replace_slashes) {
-        //     try writer.write_all(this.str);
-        //     return;
-        // }
         for &c in self.str {
             match c {
                 b'/' | b'\\' => w.write_all(b"+")?,

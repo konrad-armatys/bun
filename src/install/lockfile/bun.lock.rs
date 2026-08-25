@@ -1175,14 +1175,8 @@ impl Stringifier {
             writer.write_all(b" \"bundled\": true")?;
         }
 
-        // TODO(dylan-conway)
-        // if (meta.libc != .all) {
-        //     try writer.write_all(
-        //         \\"libc": [
-        //     );
-        //     try Negatable(Npm.Libc).to_json(meta.libc, writer);
-        //     try writer.write_all("], ");
-        // }
+        // TODO(dylan-conway): also emit `"libc": [...]` (a `Negatable<Npm::Libc>`)
+        // when `meta.libc != Libc::ALL`, like `os`/`cpu` below.
 
         if meta.os != Npm::OperatingSystem::ALL {
             if any {

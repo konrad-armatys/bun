@@ -2254,9 +2254,6 @@ pub(crate) fn init_with_runtime(
     // self-aliasing receiver+argument pair Rust forbids. Split-borrow by
     // temporarily moving the boxed lockfile out so the `&mut PackageManager`
     // passed in does not alias the `&mut Lockfile` receiver.
-    // `root_dir` was moved into `*manager` above (the field is
-    // an unbounded `&mut DirEntry`, so the local reborrow is for `'static` and the
-    // original binding is dead). Read it back through `manager.root_dir`.
     // `.data` probes must hold `entries_mutex`.
     let has_lockb = {
         let _entries_lock = FileSystem::instance().fs.entries_mutex.lock_guard();
