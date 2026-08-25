@@ -418,7 +418,6 @@ impl CatalogMap {
             });
     }
 
-
     /// Accepts `lockfile.buffers.string_bytes` directly (rather than the whole
     /// `Lockfile`) so callers can split-borrow the lockfile alongside a live
     /// `StringBuilder`.
