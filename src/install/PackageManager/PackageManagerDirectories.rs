@@ -917,7 +917,7 @@ pub struct CacheDirAndSubpath<'a> {
     pub(crate) cache_dir_subpath: &'a ZStr,
 }
 
-/// this is copy pasted from `installPackageWithNameAndResolution()`
+/// this is copy pasted from `install_package_with_name_and_resolution()`
 /// it's not great to do this
 pub fn compute_cache_dir_and_subpath<'a>(
     manager: &mut PackageManager,

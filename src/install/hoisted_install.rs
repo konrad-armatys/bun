@@ -45,7 +45,7 @@ impl run_tasks::RunTasksCtx for PackageInstaller<'_> {
         data: &ExtractData,
         log_level: package_manager::Options::LogLevel,
     ) {
-        self.fix_cached_lockfile_package_slices();
+        self.grow_successfully_installed();
         self.install_enqueued_packages_after_extraction(task_id, dependency_id, data, log_level);
     }
 

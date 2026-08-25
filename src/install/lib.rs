@@ -112,10 +112,7 @@ pub mod update_transitive;
 pub mod yarn;
 
 /// `repository` — re-export of the file-backed `repository_real` module
-/// (src/install/repository.rs). The earlier inline stub duplicated the
-/// `Repository` struct and stubbed `download`/`checkout`/`try_https` with
-/// `Err("RepositoryNotPorted")` / a partial rewrite table; the real module
-/// lives in the same crate with no dep cycle, so re-export it directly.
+/// (src/install/repository.rs).
 pub use repository_real as repository;
 
 /// `bin` — re-export of the file-backed `bin_real` module (src/install/bin.rs).

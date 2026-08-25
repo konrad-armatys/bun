@@ -290,7 +290,7 @@ impl Step {
 
 // PORTING.md §Global mutable state: install-main-thread enum. `RacyCell`
 // (no `Atomic<Method>`) — writers are the CLI option-load and the
-// clonefile/hardlink fallback in `install_with_method`, all on the install
+// clonefile/hardlink fallback while installing, all on the install
 // main thread; isolated_install workers snapshot via `supported_method()`
 // once at startup. Stored as the `repr(u8)` discriminant so reads/writes are
 // lock-free atomics (S015: AtomicU8 instead of RacyCell — single-writer path
@@ -362,8 +362,8 @@ fn mkdir_recursive_os_path(fullpath: &bun_core::WStr) -> sys::Maybe<()> {
     match sys::mkdir_w(fullpath) {
         Ok(()) => return Ok(()),
         Err(err) => match err.get_errno() {
-            // `mkpath_np` on macOS also checks EISDIR; on Windows EEXIST suffices.
-            // NodeFS additionally probes `directoryExistsAt`; the package-install
+            // macOS's mkpath also checks EISDIR; on Windows EEXIST suffices.
+            // node:fs additionally probes `directory_exists_at`; the package-install
             // call sites discard the result (`_ =`) so a bare Ok matches behaviour.
             E::EISDIR | E::EEXIST => return Ok(()),
             E::ENOENT => {
@@ -1122,7 +1122,6 @@ impl<'a> PackageInstall<'a> {
             Err(err) => return Err(Failure::boxed(err, Step::OpeningCacheDir, None)),
         };
 
-        // `bun.OSPathLiteral("node_modules")` — u8 on posix / u16 on windows.
         #[cfg(windows)]
         const NODE_MODULES_LIT: &OSPathSlice = &[
             b'n' as u16,
@@ -1702,10 +1701,8 @@ impl<'a> PackageInstall<'a> {
         #[cfg(not(windows))]
         type Head2Char = u8;
 
-        // Two overlapping slices into the same buffer (`head` is the whole
-        // buffer, `to_copy_into` is its tail) would be two live aliasing
-        // `&mut`, which is UB — pass head buffer + tail offset and reslice
-        // inside.
+        // Takes the whole buffer plus the tail's offset (not two slices of
+        // one buffer) and reslices inside.
         fn copy(
             destination_dir: &Dir,
             walker: &mut Walker,

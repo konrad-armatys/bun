@@ -481,7 +481,7 @@ pub enum BuilderMethod {
     Resolvable,
 
     /// This will filter out disabled dependencies, resulting in more aggresive
-    /// hoisting compared to `.resolvable`. We skip dependencies based on 'os', 'cpu',
+    /// hoisting compared to `Resolvable`. We skip dependencies based on 'os', 'cpu',
     /// 'libc' (TODO), and omitted dependency types (`--omit=dev/peer/optional`).
     /// Dependencies of a disabled package are not included in the output.
     Filter,

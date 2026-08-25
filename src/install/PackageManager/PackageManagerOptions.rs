@@ -206,7 +206,6 @@ pub enum Access {
 }
 
 impl Access {
-    // was `bun.ComptimeEnumMap(Access)`; ≤8 entries → plain match on &[u8].
     pub fn from_str(str: &[u8]) -> Option<Access> {
         match str {
             b"public" => Some(Access::Public),
@@ -233,7 +232,6 @@ pub enum AuthType {
 }
 
 impl AuthType {
-    // was `bun.ComptimeEnumMap(AuthType)`; ≤8 entries → plain match on &[u8].
     pub(crate) fn from_str(str: &[u8]) -> Option<AuthType> {
         match str {
             b"legacy" => Some(AuthType::Legacy),

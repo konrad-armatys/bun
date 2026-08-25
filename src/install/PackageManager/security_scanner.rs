@@ -652,8 +652,6 @@ impl<'a> PackageCollector<'a> {
         let pkg_dependencies = pkgs.items_dependencies();
 
         while let Some(item) = self.queue.pop_front() {
-            // `defer mutable_item.{pkg,dep}_path.deinit(...)` — Vec drops at end of loop body.
-
             let pkg_id = item.pkg_id;
             let _ = item.dep_id; // Could be useful in the future for dependency-specific processing
 

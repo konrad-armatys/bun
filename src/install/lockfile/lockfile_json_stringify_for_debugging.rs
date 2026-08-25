@@ -630,14 +630,13 @@ fn encode_json_string(s: &[u8], out: &mut Vec<u8>) {
 /// are modelled.
 #[derive(Clone, Copy)]
 pub struct WriteStreamOptions {
-    /// `.whitespace = .indent_N` — number of spaces per nesting level. `0`
-    /// would be `.minified`; the binding always passes `2`.
+    /// Spaces per nesting level; the binding always passes `2`.
     pub indent: usize,
     pub emit_nonportable_numbers_as_strings: bool,
 }
 
 /// JSON write stream over an in-memory `Vec<u8>`, sufficient for
-/// `bun_install_js_bindings::jsParseLockfile`.
+/// `bun_install_jsc::install_binding::js_parse_lockfile`.
 pub struct WriteStream {
     pub(crate) out: Vec<u8>,
     opts: WriteStreamOptions,

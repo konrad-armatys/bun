@@ -108,18 +108,20 @@ struct WorkFrame {
     child: u32,
 }
 
-/// Compute entry_hash for the global virtual store. The hash makes a
-/// global-store directory name unique to this entry's *resolved* dependency
-/// closure, so two projects that resolve `react@18.3.1` to the same set of
-/// transitive versions share one on-disk entry, while a project that
-/// resolves a transitive dep to a different version gets its own.
-///
-/// Eligibility propagates: an entry is only global-store-eligible (hash != 0)
-/// when the package itself comes from an immutable cache (npm/git/tarball,
-/// unpatched, no lifecycle scripts) *and* every dependency it links to is
-/// also eligible. The second condition matters because dep symlinks live
-/// inside the global entry; baking a project-local path (workspace, folder)
-/// into a shared directory would break for every other consumer.
+// `build_store` computes each entry's `entry_hash` for the global virtual
+// store. The hash makes a global-store directory name unique to this entry's
+// *resolved* dependency closure, so two projects that resolve `react@18.3.1`
+// to the same set of transitive versions share one on-disk entry, while a
+// project that resolves a transitive dep to a different version gets its own.
+//
+// Eligibility propagates: an entry is only global-store-eligible (hash != 0)
+// when the package itself comes from an immutable cache (npm/git/tarball,
+// unpatched, no lifecycle scripts) *and* every dependency it links to is
+// also eligible. The second condition matters because dep symlinks live
+// inside the global entry; baking a project-local path (workspace, folder)
+// into a shared directory would break for every other consumer.
+
+/// `io::Write` adapter feeding a `Wyhash` (entry hashes).
 struct WyhashWriter<'a> {
     hasher: &'a mut Wyhash,
 }
@@ -636,7 +638,7 @@ pub(crate) fn build_store(
 
                     // The skipped subtree would have walked up through this
                     // ancestor chain marking each node with its leaking peers.
-                    // DFS guarantees `dedupe_node`'s subtree is fully processed,
+                    // DFS guarantees `dedupe_node_id`'s subtree is fully processed,
                     // so its `peers` is exactly that set; propagate it here.
                     let set_ctx = store::node::TransitivePeerOrderedArraySetCtx {
                         string_buf,
@@ -713,7 +715,7 @@ pub(crate) fn build_store(
         }
 
         // TODO: make this sort in an order that allows peers to be resolved last
-        // and devDependency handling to match `hoistDependency`
+        // and devDependency handling to match `hoist_dependency`
         {
             let sorter = lockfile::DepSorter { lockfile };
             index_sort::sort_indices(&mut dep_ids_sort_buf, &mut |a, b| {
@@ -773,7 +775,7 @@ pub(crate) fn build_store(
                 let dep = &dependencies[dep_id as usize];
 
                 // TODO: handle duplicate dependencies. should be similar logic
-                // like we have for dev dependencies in `hoistDependency`
+                // like we have for dev dependencies in `hoist_dependency`
 
                 if !dep.behavior.is_peer() {
                     // simple case:
@@ -2641,7 +2643,7 @@ pub(crate) fn install_isolated_packages(
                 let entry_id = store::entry::Id::from(u32::try_from(_entry_id).expect("int cast"));
                 // .monotonic is okay because `Wait.isDone` should have already synchronized with
                 // the completed task threads, via popping from the `UnboundedQueue` in `runTasks`,
-                // and the .acquire load `pendingTaskCount`.
+                // and the .acquire load in `pending_task_count`.
                 let step = entry_step.load(Ordering::Relaxed);
 
                 if step == installer::Step::Done as u32 {

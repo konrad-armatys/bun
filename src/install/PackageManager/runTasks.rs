@@ -612,7 +612,7 @@ fn process_network_task(
 
                     // The download will not be retried for this task_id. Mark
                     // the dedupe entry as failed so a later
-                    // `enqueuePackageForDownload` for the same package observes
+                    // `enqueue_package_for_download` for the same package observes
                     // the failure and fails fast instead of either waiting
                     // forever on a callback that never arrives (entry kept) or
                     // re-running the entire download+retry cycle (entry removed).

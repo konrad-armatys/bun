@@ -771,7 +771,7 @@ impl PackageVersion {
         self.bundled_dependencies.is_invalid()
     }
 
-    /// Used by `Package.fromNPM` to walk dependency groups by name.
+    /// Used by `Package::from_npm` to walk dependency groups by name.
     pub(crate) fn dep_group(&self, field: &[u8]) -> ExternalStringMap {
         match field {
             b"dependencies" => self.dependencies,

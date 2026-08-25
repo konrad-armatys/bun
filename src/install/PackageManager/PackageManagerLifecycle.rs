@@ -39,7 +39,7 @@ impl PackageManager {
     }
 
     /// A separate `lockfile` parameter would only feed `lockfile.packages.len` into
-    /// `ensurePreinstallStateListCapacity`. Every caller passes
+    /// `ensure_preinstall_state_list_capacity`. Every caller passes
     /// `self.lockfile` (or an alias of it), which would alias `&mut self`;
     /// `self.lockfile` is read directly instead to keep
     /// borrowck happy.

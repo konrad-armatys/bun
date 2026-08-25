@@ -166,7 +166,7 @@ impl<'a> TreeDepsSortCtx<'a> {
 }
 
 /// The slot order every existing bun.lock has its `trustedDependencies` and
-/// `patchedDependencies` in (`std.AutoHashMap(u64)`'s hash).
+/// `patchedDependencies` in (the hash Zig's `std.AutoHashMap(u64)` used).
 struct WrittenOrderContext;
 
 impl HashContext<u64> for WrittenOrderContext {
@@ -2438,7 +2438,7 @@ pub(crate) fn parse_into_binary_lockfile(
     let mut workspace_pkgs_len: u32 = 0;
 
     if lockfile_version != Version::V0 {
-        // these are the `workspaceOnly` packages
+        // these are the workspace-only packages
         // snapshot the workspace-path handles up front so the loop
         // body can take `&mut *lockfile` (`parse_append_dependencies`,
         // `append_package_dedupe`) without conflicting with the
@@ -3731,7 +3731,7 @@ fn parse_append_dependencies<const CHECK_FOR_BUNDLED: bool, const IS_ROOT: bool>
 
     {
         let bytes = lockfile.buffers.string_bytes.as_slice();
-        // `Dependency::cmp` is the total-order form of `isLessThan` (behavior group, then name ASC).
+        // `Dependency::cmp` is the total-order form of `is_less_than` (behavior group, then name ASC).
         index_sort::sort_slice_by(&mut lockfile.buffers.dependencies[off..], |a, b| {
             Dependency::cmp(bytes, a, b)
         });

@@ -86,7 +86,6 @@ pub use self::lockfile_json_stringify_for_debugging::json_stringify;
 pub use self::override_map::OverrideMap;
 pub use self::package::Package;
 pub use self::tree::Tree;
-pub use crate::padding_checker::assert_no_uninitialized_padding;
 // Bring the derive-generated `items_*` column accessors (`PackageColumns` for
 // `MultiArrayList<Package>`, `PackageColumns` for `Slice<Package>`) into scope.
 use self::package::PackageColumns as _;
@@ -659,7 +658,7 @@ impl<'a> LoadResult<'a> {
         }
     }
 
-    // Callers reach this only after `handleLoadLockfileErrors` has exited on
+    // Callers reach this only after `handle_load_lockfile_errors` has exited on
     // the `NotFound`/`Err` arms, so the variant is known-`Ok`.
     bun_core::enum_unwrap!(pub LoadResult, Ok => fn ok / ok_mut -> LoadResultOk<'a>);
 }
@@ -1169,7 +1168,7 @@ impl Lockfile {
         // We will only shrink the number of packages here.
         // never grow
 
-        // preinstall_state is used during installPackages. the indexes(package ids) need
+        // preinstall_state is used while installing packages. the indexes(package ids) need
         // to be remapped. Also ensure `preinstall_state` has enough capacity to contain
         // all packages. It's possible it doesn't because non-npm packages do not use
         // preinstall state before linking stage.
@@ -1558,9 +1557,6 @@ impl Lockfile {
         // `tree::Builder` stores `lockfile: ParentRef<Lockfile>` so
         // the `&mut buffers.resolutions` split-borrow below can coexist with
         // the read-only lockfile view inside the builder (see Tree.rs note).
-        // `ParentRef::new` captures `SharedReadOnly` provenance from `&*self`,
-        // which is exactly what `Builder` needs (it only ever `Deref`s); the
-        // `Builder` does not outlive this `&mut self` borrow.
         let self_contained = self.self_contained_workspace_ids();
         let lockfile_ref = bun_ptr::ParentRef::<Lockfile>::new(&*self);
         let mut builder = tree::Builder::<METHOD> {
@@ -3307,7 +3303,7 @@ pub mod default_trusted_dependencies {
         MAP.has_with_hash(hash)
     }
 
-    /// Open-coded `hasContext` so the lookup key can borrow with any lifetime,
+    /// Open-coded lookup so the key can borrow with any lifetime,
     /// not just `'static`.
     pub(crate) fn has(name: &[u8]) -> bool {
         let hash = (SemverStringBuilder::string_hash(name) as u32) as u64;

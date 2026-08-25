@@ -53,7 +53,7 @@ pub struct AsyncHTTP<'a> {
     pub(crate) signals: Signals,
 
     /// Buffers `url` / `client.header_buf` / `client.http_proxy` may borrow
-    /// from when the request was built with [`AsyncHTTP::init_owned`].
+    /// from when the request was built with [`OwnedRequest::new`].
     /// Declared last so it is dropped after every field that points into it.
     owned: OwnedRequestBuffers,
 }
@@ -61,7 +61,7 @@ pub struct AsyncHTTP<'a> {
 bun_threading::intrusive_work_task!(['a] AsyncHTTP<'a>, task);
 
 /// Backing storage for a request that owns the bytes its URL, header block
-/// and proxy URL are parsed from (see [`AsyncHTTP::init_owned`]).
+/// and proxy URL are parsed from (see [`OwnedRequest::new`]).
 #[derive(Default)]
 pub struct OwnedRequestBuffers {
     pub url: Box<[u8]>,

@@ -52,8 +52,7 @@ type AutoPath = paths::Path<u8, { PathKind::ANY }, { PathSeparators::AUTO }>;
 type OsAutoAbsPath = AbsPath<paths::OSPathChar, { PathSeparators::AUTO }>;
 type OsAutoPath = paths::Path<paths::OSPathChar, { PathKind::ANY }, { PathSeparators::AUTO }>;
 type DefaultAbsPath = AbsPath<u8>;
-/// `node_modules/.bun` — the `MODULES_DIR_NAME` const is `&[u8]` and not
-/// usable in `const_format::concatcp!`, so spell the literal.
+/// `node_modules/.bun`, as a `&str` for `const_format::concatcp!`.
 const NODE_MODULES_BUN: &str = "node_modules/.bun";
 
 bun_output::declare_scope!(IsolatedInstaller, hidden);
@@ -214,7 +213,7 @@ impl<'a> Installer<'a> {
     /// Called from main thread when a tarball download or extraction fails.
     /// Without this, the upfront pending-task slot for each waiting entry is
     /// never released and the install loop blocks forever on
-    /// `pendingTaskCount() == 0`.
+    /// `pending_task_count() == 0`.
     pub(crate) fn on_package_download_error(
         &mut self,
         task_id: crate::package_manager_task::Id,
@@ -1106,7 +1105,7 @@ impl Task<'_> {
                         // directory. Writing the new project-local tree
                         // *through* that link would mutate the shared entry
                         // underneath every other consumer; on Windows the
-                        // `.expect_missing` dep-symlink rewrite then bakes a
+                        // `ExpectMissing` dep-symlink rewrite then bakes a
                         // project-absolute junction target into the shared
                         // directory, which dangles after the next
                         // `rm -rf node_modules`. Detach first so the build
@@ -2540,7 +2539,7 @@ impl<'a> Installer<'a> {
         }
     }
 
-    /// Like `appendStoreNodeModulesPath`, but resolves to the *physical*
+    /// Like `append_store_node_modules_path`, but resolves to the *physical*
     /// location of the entry's `node_modules` directory: the global virtual
     /// store for global-eligible entries, or the project-local `.bun/` path
     /// otherwise. See `Which` for when to pass `.staging` vs `.final`.
@@ -2558,7 +2557,7 @@ impl<'a> Installer<'a> {
         self.append_store_node_modules_path(buf, entry_id);
     }
 
-    /// `appendStorePath` resolved to the entry's *physical* location. See
+    /// `append_store_path` resolved to the entry's *physical* location. See
     /// `Which` for when to pass `.staging` vs `.final`.
     pub(crate) fn append_real_store_path(
         &self,

@@ -288,7 +288,7 @@ pub mod entry {
         /// Two projects that resolve the same package to the same dependency closure
         /// share one global-store entry; if a transitive dep version differs, the
         /// hash differs and a new global-store entry is created. Computed after the
-        /// store is built (see `computeEntryHashes`). 0 means "do not use global store"
+        /// store is built (in `build_store`). 0 means "do not use global store"
         /// (root, workspace, folder, symlink, patched).
         pub entry_hash: u64,
 

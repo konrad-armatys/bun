@@ -88,7 +88,7 @@ pub(crate) struct ParsedGitUrl<'a> {
     pub(crate) repo: Option<&'a [u8]>,
     // Optional owned "https://github.com/{path}" buffer so the borrow
     // case stays zero-copy. Callers must check `owned_url` first: when it is `Some`,
-    // it supersedes `url` (see `into_resolved`).
+    // it supersedes `url`.
     pub(crate) owned_url: Option<Vec<u8>>,
 }
 

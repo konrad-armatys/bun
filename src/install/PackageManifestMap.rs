@@ -42,9 +42,9 @@ type ManifestHashMap =
 pub struct DiskCacheCtx {
     pub(crate) enable_manifest_cache: bool,
     pub(crate) enable_manifest_cache_control: bool,
-    /// `pm.getCacheDirectory()` — pre-opened so the lookup never needs `&mut
-    /// PackageManager`. `None` iff `enable_manifest_cache` is false (the only
-    /// branch that reads it is gated on that flag).
+    /// The package manager's cache directory. `None` iff
+    /// `enable_manifest_cache` is false (the only branch that reads it is
+    /// gated on that flag).
     pub(crate) cache_directory: Option<Fd>,
     pub(crate) timestamp_for_manifest_cache_control: u32,
     /// `--prefer-offline` / `--offline`: a cached manifest counts as fresh regardless of

@@ -456,7 +456,7 @@ pub fn install_with_manager(
                         pinned_rows = enqueue_transitive(manager, &transitive, invalidates_rows)?;
                     }
 
-                    // `enqueueDependencyWithMain` can reach `Lockfile.Package.fromNPM`,
+                    // `enqueue_dependency_with_main` can reach `Package::from_npm`,
                     // which grows `buffers.dependencies` and may reallocate it.
                     // Iterate by index against a snapshot of the original length and
                     // copy each entry to the stack so neither the loop nor the callee
@@ -1930,10 +1930,10 @@ fn wait_for_resolution(manager: &mut PackageManager) -> crate::Result<()> {
     }
 
     // Resolving a peer dep can create a NEW package whose own peer deps
-    // get re-queued to `peer_dependencies` during `drainDependencyList`.
+    // get re-queued to `peer_dependencies` during `drain_dependency_list`.
     // When all manifests are cached (synchronous resolution), no I/O tasks
-    // are spawned, so `pendingTaskCount() == 0`. We must drain the peer
-    // queue iteratively here — entering the event loop (`waitForPeers`)
+    // are spawned, so `pending_task_count() == 0`. We must drain the peer
+    // queue iteratively here — entering the event loop (`wait_for_peers`)
     // with zero pending I/O would block forever.
     while manager.peer_dependencies.readable_length() > 0 {
         manager.process_peer_dependency_list()?;

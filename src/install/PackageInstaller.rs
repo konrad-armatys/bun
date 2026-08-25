@@ -948,15 +948,9 @@ impl<'a> PackageInstaller<'a> {
         true
     }
 
-    // `pub fn deinit` dropped. All owned fields (`pending_lifecycle_scripts: Vec`,
-    // `completed_trees: Bitset`, `trees: Box<[TreeContext]>`, `tree_ids_to_trees_the_id_depends_on`,
-    // `node_modules`, `trusted_dependencies_from_update_requests`) impl Drop. Borrowed fields
-    // (`manager`, `lockfile`, etc.) are not freed.
-
-    /// Call when you mutate the length of `lockfile.packages`
-    pub(crate) fn fix_cached_lockfile_package_slices(&mut self) {
-        // fixes an assertion failure where a transitive dependency is a git dependency newly added to the lockfile after the list of dependencies has been resized
-        // this assertion failure would also only happen after the lockfile has been written to disk and the summary is being printed.
+    /// Grow `successfully_installed` to cover packages appended to the
+    /// lockfile since it was sized (e.g. a git dependency's transitive deps).
+    pub(crate) fn grow_successfully_installed(&mut self) {
         let packages_len = self.manager.lockfile.packages.len();
         if self.successfully_installed.bit_length() < packages_len {
             let new = Bitset::init_empty(packages_len).unwrap_or_oom();

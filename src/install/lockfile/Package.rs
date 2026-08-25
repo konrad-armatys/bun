@@ -542,10 +542,10 @@ impl Package<u64> {
 
         let id = new.packages.len() as PackageID;
 
-        // `appendPackageWithID` borrows `&mut Lockfile` whole, so build the
+        // `append_package_with_id` borrows `&mut Lockfile` whole, so build the
         // `Package` value and clone the dependency strings *first* (only needs
         // disjoint buffer fields), drop the builder, then append, then write
-        // resolutions. `appendPackageWithID` touches `packages` /
+        // resolutions. `append_package_with_id` touches `packages` /
         // `package_index` / `string_bytes` only — none of which the dependency
         // pass mutates — so the reorder is observationally identical.
         let pkg_value = Package {
@@ -1467,10 +1467,7 @@ impl Diff {
                         );
                         let _ = package_json_path.append(b"package.json");
 
-                        // `bun.sys.File.toSource` was removed from
-                        // T1 (`bun_sys`) because `bun_ast::Source` lives in T2.
-                        // Route through the workspace cache's path-based getter
-                        // instead, which both reads and parses.
+                        // The workspace cache's path-based getter both reads and parses.
                         let mut workspace_pkg = Package::default();
 
                         // The cache entry borrows `pm.workspace_package_json_cache`;

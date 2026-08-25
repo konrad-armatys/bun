@@ -1034,7 +1034,7 @@ fn is_real_dir_not_symlink(path: &[u8]) -> bool {
 
 fn detach_module_folder_from_shared_store(module_folder: &[u8]) {
     // `module_folder` reaches here normalised to forward slashes on every
-    // platform (see `pathToPosixBuf` in `preparePatch`). Re-normalise to the
+    // platform (see `prepare_patch`). Re-normalise to the
     // platform separator so `undo()`/`basename()` walk the path correctly on
     // Windows and the lstat/getFileAttributes calls below see a native path.
     #[cfg(windows)]

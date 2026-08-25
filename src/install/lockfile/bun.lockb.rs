@@ -25,9 +25,9 @@ use bun_core::strings;
 use bun_install::{PackageID, PackageManager, PackageNameAndVersionHash, PackageNameHash};
 use bun_semver::{self as semver, String as SemverString};
 
-// Serialized padding bytes must be deterministic; the per-field
-// save path zeroes padding explicitly (see the note in `save` and the
-// `assert_no_uninitialized_padding` invariant in `Package::Serializer`).
+// Serialized padding bytes must be deterministic; the per-field save path
+// writes `bytemuck::NoUninit` columns (see `Package::Serializer`), so there
+// are no uninitialized bytes to leak.
 
 const HEADER_BYTES: &[u8] = b"#!/usr/bin/env bun\nbun-lockfile-format-v0\n";
 
@@ -174,8 +174,7 @@ pub(crate) fn save(
     end_pos: &mut usize,
 ) -> Result<(), Error> {
     // No defensive clone of `packages` is needed for byte-exact serialization:
-    // the per-field writers below already zero-pad via the
-    // `assert_no_uninitialized_padding` invariant.
+    // the per-field writers below only accept `bytemuck::NoUninit` columns.
 
     // `writer` and `stream` roles are collapsed into a single `StreamType`.
     let mut stream = StreamType { bytes };
@@ -437,7 +436,7 @@ pub(crate) fn load(
     lockfile.packages = packages_load_result.list;
 
     // `meta.id` is memcpy'd verbatim from disk with no range validation; a
-    // corrupt `bun.lockb` can make it garbage and trip `panic_bounds_check`
+    // corrupt `bun.lockb` can make it garbage and trip a bounds-check panic
     // in `Package::clone` / `preinstall_state` indexing later. Surface it
     // here as a parse error so the installer can warn + re-resolve instead
     // of aborting.
@@ -531,7 +530,7 @@ pub(crate) fn load(
     {
         let remaining_in_buffer = total_buffer_size.saturating_sub(stream.pos as u64);
 
-        // >= because `has_empty_trusted_dependencies_tag` is tag only
+        // >= because `HAS_EMPTY_TRUSTED_DEPENDENCIES_TAG` is tag only
         if remaining_in_buffer >= 8 && total_buffer_size <= stream.buffer.len() as u64 {
             let next_num = stream.read_int_le::<u64>()?;
             if remaining_in_buffer > 8 && next_num == HAS_TRUSTED_DEPENDENCIES_TAG {

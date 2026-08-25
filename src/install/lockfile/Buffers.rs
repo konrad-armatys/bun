@@ -244,7 +244,7 @@ where
         // Write the explicit `Tree.External` form so the on-disk layout is
         // independent of `repr(Rust)` field order: 20 bytes/tree, fields in
         // the `[id|dep_id|parent|off|len]` order that `load` decodes via
-        // `Tree.toTree`.
+        // `Tree::to_tree`.
         let mut clone: Vec<tree::External> = Vec::with_capacity(buffers.trees.len());
         for &item in buffers.trees.as_slice() {
             clone.push(Tree::to_external(item));

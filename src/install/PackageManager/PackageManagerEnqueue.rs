@@ -546,8 +546,8 @@ pub fn enqueue_dependency_to_root(
     } as DependencyID;
 
     if this.lockfile.buffers.resolutions[dep_id as usize] == invalid_package_id {
-        // Copy to the stack: `enqueueDependencyWithMainAndSuccessFn` can call
-        // `Lockfile.Package.fromNPM`, which grows `buffers.dependencies` and
+        // Copy to the stack: `enqueue_dependency_with_main_and_success_fn` can call
+        // `Package::from_npm`, which grows `buffers.dependencies` and
         // would invalidate a pointer taken directly into it.
         let dependency = this.lockfile.buffers.dependencies[dep_id as usize].clone();
         if let Err(err) = enqueue_dependency_with_main_and_success_fn(
@@ -820,7 +820,7 @@ pub fn enqueue_dependency_with_main_and_success_fn(
         }
 
         // explicit copy here due to `dependency.version` becoming undefined
-        // when `getOrPutResolvedPackageWithFindResult` is called and resizes the list.
+        // when `get_or_put_resolved_package_with_find_result` is called and resizes the list.
         version_was_replaced = false;
         break 'version dependency.version.clone();
     };
@@ -2113,7 +2113,7 @@ fn get_or_put_resolved_package_with_find_result(
         return Ok(None);
     }
 
-    // appendPackage sets the PackageID on the package
+    // append_package sets the PackageID on the package
     let package = {
         let PackageManager {
             lockfile,
@@ -2260,7 +2260,7 @@ fn get_or_put_resolved_package(
                         if resolution_satisfies_dependency(this, &existing_resolution, version) {
                             success_fn(this, dependency_id, existing_id);
                             return Ok(Some(ResolvedPackageResult {
-                                // we must fetch it from the packages array again, incase the package array mutates the value in the `successFn`
+                                // we must fetch it from the packages array again, incase the package array mutates the value in the `success_fn`
                                 package: *this.lockfile.packages.get(existing_id as usize),
                                 ..Default::default()
                             }));
@@ -2292,7 +2292,7 @@ fn get_or_put_resolved_package(
                             );
                             success_fn(this, dependency_id, existing_id);
                             return Ok(Some(ResolvedPackageResult {
-                                // we must fetch it from the packages array again, incase the package array mutates the value in the `successFn`
+                                // we must fetch it from the packages array again, incase the package array mutates the value in the `success_fn`
                                 package: *this.lockfile.packages.get(existing_id as usize),
                                 ..Default::default()
                             }));
@@ -2343,7 +2343,7 @@ fn get_or_put_resolved_package(
                             );
                             success_fn(this, dependency_id, list[0]);
                             return Ok(Some(ResolvedPackageResult {
-                                // we must fetch it from the packages array again, incase the package array mutates the value in the `successFn`
+                                // we must fetch it from the packages array again, incase the package array mutates the value in the `success_fn`
                                 package: *this.lockfile.packages.get(existing_package_id as usize),
                                 ..Default::default()
                             }));

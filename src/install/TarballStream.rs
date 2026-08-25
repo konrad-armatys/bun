@@ -168,7 +168,7 @@ struct Files {
     use_lseek: bool,
     /// Per-entry write cursors, carried across `write_data_block` calls so
     /// the sparse-file handling in `close_output_file` matches
-    /// `Archive.readDataIntoFd` exactly (which tracks these across its own
+    /// `Archive::read_data_into_fd` exactly (which tracks these across its own
     /// block loop). Reset in `begin_entry` when a new output file is opened.
     entry_actual_offset: i64,
     entry_final_offset: i64,
@@ -933,7 +933,7 @@ impl Files {
 
     fn close_output_file(&mut self) {
         if let Some(fd) = self.out_fd {
-            // Same trailing-hole handling as `Archive.readDataIntoFd`:
+            // Same trailing-hole handling as `Archive::read_data_into_fd`:
             // extend the file to cover the furthest block we were asked
             // to write even if the pwrite/lseek fallback path left
             // `actual_offset` behind.
@@ -987,14 +987,14 @@ impl Files {
 
         if self.npm_mode && kind != FileKind::File {
             // npm tarballs only contain files; matching the libarchive path
-            // in Archiver.extractToDir we skip everything else.
+            // in Archiver::extract_to_dir we skip everything else.
             self.phase = Phase::WantData;
             self.out_fd = None;
             return Ok(());
         }
 
         // Strip the leading `package/` (or `<repo>-<sha>/` for GitHub) and
-        // normalise. Same transformation as Archiver.extractToDir so both
+        // normalise. Same transformation as Archiver::extract_to_dir so both
         // paths produce identical on-disk layouts.
         let mut tokenizer = pathname[..]
             .split(|c| *c == ('/' as OSPathChar))
@@ -1118,7 +1118,7 @@ impl Files {
     }
 
     /// Write one data block from `archive_read_data_block`. Mirrors the
-    /// sparse/pwrite handling in `Archive.readDataIntoFd` but operates on a
+    /// sparse/pwrite handling in `Archive::read_data_into_fd` but operates on a
     /// single block so it can be interleaved with ARCHIVE_RETRY yields.
     /// `entry_actual_offset` / `entry_final_offset` persist across calls so
     /// `close_output_file` can perform the same trailing `ftruncate` the
@@ -1279,7 +1279,7 @@ fn make_directory(entry: &mut lib::Entry, dest_fd: Fd, path: OSPathZ, path_slice
 
 #[cfg(windows)]
 fn apply_windows_npm_path_escapes(path: &mut [OSPathChar]) {
-    // Same transformation as Archiver.extractToDir: encode characters
+    // Same transformation as Archiver::extract_to_dir: encode characters
     // Windows rejects in filenames into the 0xf000 private-use range so
     // the extraction round-trips with node-tar.
     let mut remain: &mut [OSPathChar] = path;

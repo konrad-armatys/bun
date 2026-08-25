@@ -98,9 +98,8 @@ pub mod options {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Only the `printHelp` text is needed by `CommandLineArguments::parse`. The
-// `exec()` body remains in bun_cli (it depends on tier-6 ScanCommand /
-// PackCommand etc. and is the *consumer* of install, not a dependency).
+// Only the help text is needed by `CommandLineArguments::parse`; the
+// commands themselves live in the runtime CLI.
 // ──────────────────────────────────────────────────────────────────────────
 pub(crate) struct PackageManagerCommand;
 
@@ -414,13 +413,13 @@ pub struct PackageManager {
     // workspace package. We keep track of the original here.
     pub original_package_json_path: ZBox,
 
-    // null means root. Used during `cleanWithLogger` to identifier which
+    // null means root. Used during `clean_with_logger` to identify which
     // workspace is adding/removing packages
     pub workspace_name_hash: Option<PackageNameHash>,
 
     pub workspace_package_json_cache: WorkspacePackageJSONCache,
 
-    // normally we have `UpdateRequests` to work with for adding/deleting/updating packages, but
+    // normally we have `UpdateRequest`s to work with for adding/deleting/updating packages, but
     // if `bun update` is used without any package names we need a way to keep information for
     // the original packages that are updating.
     //

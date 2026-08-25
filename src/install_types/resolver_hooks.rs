@@ -1565,7 +1565,7 @@ pub trait AutoInstaller {
     ) -> core::result::Result<DependencyID, bun_core::Error>;
 
     // ── Lockfile writes ───────────────────────────────────────────────────
-    /// Port of `lockfile.appendPackage(Package.fromPackageJSON(...))` —
+    /// `lockfile.append_package(Package::parse(<package.json>))` —
     /// collapsed because `Package` itself is install-internal. Returns the
     /// id assigned to the appended package.
     fn lockfile_append_from_package_json(
