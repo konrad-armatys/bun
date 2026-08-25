@@ -299,7 +299,6 @@ pub(crate) fn to_dependency(this: External, ctx: &mut Context<'_>) -> Dependency
     let name = String {
         bytes: this[0..8].try_into().expect("infallible: size matches"),
     };
-    // SAFETY: same-size POD bitcast
     let name_hash: u64 =
         u64::from_ne_bytes(this[8..16].try_into().expect("infallible: size matches"));
     Dependency {

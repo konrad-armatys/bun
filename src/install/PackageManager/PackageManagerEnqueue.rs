@@ -40,7 +40,6 @@ use bun_install::{
 // `verbose_install()` call sites read the same.
 #[inline]
 fn verbose_install() -> bool {
-    // SAFETY: set once during single-threaded CLI startup; only read here.
     PackageManager::verbose_install()
 }
 
@@ -736,7 +735,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
             if let Some(aliased) = this.known_npm_aliases.get(&name_hash) {
                 let group = &dependency.version.npm().version;
                 let buf = this.lockfile.buffers.string_bytes.as_slice();
-                // SAFETY: `aliased` is always tag == Npm (known_npm_aliases only stores npm versions).
                 let mut curr_list: Option<&Semver::semver_query::List> =
                     Some(&aliased.npm().version.head);
                 while let Some(queries) = curr_list {
@@ -1041,14 +1039,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
                             );
                         }
                     } else if version.tag.is_npm() {
-                        // reshaped for borrowck — `name_str` borrows
-                        // `this.lockfile.buffers.string_bytes`. Route the whole
-                        // branch through a raw root so the slice and the
-                        // `&mut PackageManager` calls below can coexist.
-                        // Snapshot the manifest disk-cache scalars while we
-                        // still hold `&mut this` exclusively — taking it via
-                        // `&mut *this_ptr` after `name_str`/`scope` exist
-                        // would pop their borrow-stack tags under SB.
                         let cache_ctx = this.manifest_disk_cache_ctx();
                         // Owned copy: `get_or_put_resolved_package_with_find_result`
                         // below appends to `string_bytes` (and may reallocate it),
@@ -1305,7 +1295,6 @@ pub fn enqueue_dependency_with_main_and_success_fn(
                 } else {
                     let pkg_id = this.lockfile.buffers.resolutions[id as usize];
                     let pkg_res = this.lockfile.packages.items_resolution()[pkg_id as usize];
-                    // SAFETY: tag checked — `value.git` is the active union arm.
                     (pkg_res.tag == ResolutionTag::Git)
                         .then(|| this.lockfile.str(&pkg_res.git().resolved).to_vec())
                 };
@@ -2685,7 +2674,6 @@ fn get_or_put_resolved_package(
                 }
             }
             // package name hash should be used to find workspace path from map
-            // SAFETY: `version.tag == Workspace` discriminates the union arm.
             let workspace_path_raw: SemverString = this
                 .lockfile
                 .workspace_paths

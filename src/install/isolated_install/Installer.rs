@@ -15,7 +15,6 @@ use crate::bin_real;
 use crate::lockfile::package;
 use crate::lockfile_real::PackageIDSlice;
 use crate::package_install::{Method as InstallMethod, Summary as InstallSummary};
-use crate::package_manager_real::Command;
 use crate::postinstall_optimizer;
 use crate::postinstall_optimizer::PostinstallOptimizer;
 use crate::resolution;
@@ -79,7 +78,6 @@ pub struct Installer<'a> {
     /// it read-only through their `BackRef<Installer>`.
     pub(crate) manager: &'a mut PackageManager,
     pub(crate) shared: &'static crate::package_manager::Shared,
-    pub(crate) command_ctx: Command::Context<'a>,
 
     pub(crate) store: &'a Store,
 

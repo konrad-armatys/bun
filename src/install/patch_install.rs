@@ -272,14 +272,6 @@ impl PatchTask {
                         BStr::new(pkg_name.slice(&manager.lockfile.buffers.string_bytes))
                     );
 
-                    // SAFETY: every `Resolution` `Value` payload is `Copy`
-                    // POD and the union is zero-initialized (see the union
-                    // accessors in resolution.rs), so reading `.npm.version`
-                    // yields initialized bytes even when the active variant
-                    // is not `npm` — possibly stale, never uninit. This arm
-                    // is reachable for non-npm resolutions too (git/github/
-                    // tarball; see the TODO below), which then read garbage
-                    // version bytes into the task id, not UB.
                     let pkg_npm_version = {
                         let res = &manager.lockfile.packages.items_resolution()[pkg_id as usize];
                         if res.tag == crate::resolution_real::Tag::Npm {

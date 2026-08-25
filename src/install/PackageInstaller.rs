@@ -10,7 +10,6 @@ use bun_semver::String;
 use bun_sys::{self as Syscall, Dir, Fd};
 
 use crate::bin_real as bin;
-use crate::bun_bunfig::Arguments as Command;
 use crate::bun_fs::FileSystem;
 use crate::bun_progress::Node as ProgressNode;
 
@@ -60,7 +59,6 @@ pub struct PackageInstaller<'a> {
     pub(crate) destination_dir_subpath_buf: PathBuffer,
     pub(crate) folder_path_buf: PathBuffer,
     pub(crate) successfully_installed: Bitset,
-    pub(crate) command_ctx: Command::Context<'a>,
     pub(crate) current_tree_id: lockfile::tree::Id,
     /// Trees that live under a self-contained workspace: packages there are copied
     /// (real files) rather than hardlinked/cloned/symlinked from the cache, so tools
@@ -731,7 +729,6 @@ impl<'a> PackageInstaller<'a> {
                 let output_in_foreground = false;
 
                 if let Err(err) = self.manager.spawn_package_lifecycle_scripts(
-                    self.command_ctx,
                     entry.list,
                     optional,
                     output_in_foreground,
@@ -860,7 +857,6 @@ impl<'a> PackageInstaller<'a> {
             let optional = entry.optional;
             let output_in_foreground = false;
             if let Err(err) = self.manager.spawn_package_lifecycle_scripts(
-                self.command_ctx,
                 entry.list,
                 optional,
                 output_in_foreground,

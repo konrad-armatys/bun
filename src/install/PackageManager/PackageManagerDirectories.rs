@@ -762,7 +762,7 @@ pub fn setup_global_dir(manager: &mut PackageManager, ctx: &Command::Context) ->
     let path = FileSystem::instance()
         .dirname_store()
         .append(result.as_bytes_with_nul())?;
-    // SAFETY: `path` includes the trailing NUL (we appended `as_bytes_with_nul`)
+    // `path` includes the trailing NUL (we appended `as_bytes_with_nul`)
     // and lives for program lifetime in the dirname store.
     manager.options.bin_path = ZStr::from_slice_with_nul(path);
     Ok(())
@@ -1262,8 +1262,6 @@ impl CacheVersion {
 
 #[inline]
 fn verbose_install() -> bool {
-    // SAFETY: `VERBOSE_INSTALL` is set once during single-threaded CLI startup
-    // (PackageManagerOptions.load) and only read on the main thread.
     PackageManager::verbose_install()
 }
 

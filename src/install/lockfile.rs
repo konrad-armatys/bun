@@ -1380,7 +1380,6 @@ fn clean_verbose_report_cold(old: &Lockfile, new: &Lockfile, timer: Option<&Time
         "Clean lockfile: {} packages -> {} packages in {}\n",
         old.packages.len(),
         new.packages.len(),
-        // SAFETY: only entered when `log_level.is_verbose()`, which set `timer = Some(..)`.
         bun_core::fmt::fmt_duration_one_decimal(timer.unwrap().read()),
     );
 }
@@ -3190,8 +3189,6 @@ impl Lockfile {
 
         match version.tag {
             dependency::Tag::Npm => {
-                // SAFETY: tag checked == .npm above; `npm` is the active
-                // `dependency::Value` union field.
                 let npm_group = &version.npm().version;
                 // Only a resolution whose own tag is npm may be read through
                 // `Resolution::npm()`: the root package, workspace members, and

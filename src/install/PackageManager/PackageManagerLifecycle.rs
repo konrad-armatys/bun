@@ -18,7 +18,6 @@ use crate::bun_fs::FileSystem;
 use super::directories;
 use crate::lifecycle_script_runner::LifecycleScriptSubprocess as RealLifecycleScriptSubprocess;
 use crate::lockfile_real::package::scripts::List as ScriptsList;
-use crate::package_manager_real::Command;
 use crate::package_manager_real::run_tasks;
 use crate::resolution_real::Tag as ResolutionTag;
 use bun_install::lockfile::{Lockfile, Package};
@@ -113,10 +112,6 @@ impl PackageManager {
                     break 'brk Some(patched_dep.patchfile_hash().unwrap());
                 };
 
-                // SAFETY: each arm reads the union variant that matches the
-                // `pkg.resolution.tag` just dispatched on; `Resolution` is
-                // zero-initialised (`Value::zero()`) so even a stale tag yields
-                // POD bytes, never uninit.
                 let mut folder_path_buf = bun_paths::PathBuffer::uninit();
                 let folder_path: &ZStr = match pkg.resolution.tag {
                     ResolutionTag::Git => directories::cached_git_folder_name_print_auto(
@@ -328,7 +323,6 @@ impl PackageManager {
     /// TODO: re-evaluate whether some variables still need to be atomic
     pub fn spawn_package_lifecycle_scripts(
         &mut self,
-        ctx: Command::Context<'_>,
         list: ScriptsList,
         optional: bool,
         foreground: bool,
@@ -352,7 +346,7 @@ impl PackageManager {
         // `cwd` out so the PATH builder can borrow it independently.
         let cwd_owned: Vec<u8> = list.cwd.as_bytes().to_vec();
         let cwd: &[u8] = &cwd_owned;
-        let env_loader = self.configure_env_for_scripts(ctx, log_level)?;
+        let env_loader = self.configure_env_for_scripts()?;
         let mut script_env = env_loader.map.clone_with_allocator()?;
         // `defer script_env.map.deinit()` — handled by Drop
 

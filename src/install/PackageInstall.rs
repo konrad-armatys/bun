@@ -1735,7 +1735,6 @@ impl<'a> PackageInstall<'a> {
                             head2[to_copy_into2_offset..target_len]
                                 .copy_from_slice(entry.path.as_bytes());
                             head2[target_len] = 0;
-                            // SAFETY: NUL written above.
                             let target = ZStr::from_buf(head2, target_len);
 
                             if let Err(err) =
@@ -1875,7 +1874,6 @@ impl<'a> PackageInstall<'a> {
                 .expect("infallible: in-memory write");
             let written = 48 - cursor.len();
             rand_path_buf[written] = 0;
-            // SAFETY: NUL written at [written].
             ZStr::from_buf(&rand_path_buf, written)
         };
 
@@ -2060,7 +2058,6 @@ impl<'a> PackageInstall<'a> {
                 wbuf[i] = bun_paths::SEP_WINDOWS as u16;
                 i += 1;
                 wbuf[i] = 0;
-                // SAFETY: NUL written at [i].
                 let fullpath = bun_core::WStr::from_buf(&wbuf[..], i);
 
                 let _ = mkdir_recursive_os_path(fullpath);
@@ -2076,12 +2073,10 @@ impl<'a> PackageInstall<'a> {
             offset += dest.len();
             dest_buf[offset] = 0;
 
-            // SAFETY: NUL written at [offset].
             let dest_z = ZStr::from_buf(&dest_buf, offset);
 
             let to_len = to_path.len();
             to_buf[to_len] = 0;
-            // SAFETY: NUL written at [to_len].
             let target_z = ZStr::from_buf(&to_buf, to_len);
 
             // https://github.com/npm/cli/blob/162c82e845d410ede643466f9f8af78a312296cc/workspaces/arborist/lib/arborist/reify.js#L738
@@ -2137,11 +2132,9 @@ impl<'a> PackageInstall<'a> {
             let mut target_buf = PathBuffer::uninit();
             target_buf[..target.len()].copy_from_slice(target);
             target_buf[target.len()] = 0;
-            // SAFETY: NUL written above.
             let target_z = ZStr::from_buf(&target_buf, target.len());
             let mut dest_name_buf = [0u8; 512];
             dest_name_buf[..dest.len()].copy_from_slice(dest);
-            // SAFETY: zero-initialized; NUL at [dest.len()].
             let dest_z = ZStr::from_buf(&dest_name_buf, dest.len());
             if let Err(err) = sys::symlinkat(target_z, dest_dir.fd(), dest_z) {
                 return InstallResult::fail(err.into(), Step::LinkingDependency, None);

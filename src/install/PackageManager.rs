@@ -899,13 +899,9 @@ impl PackageManager {
     /// The env loader, with everything lifecycle scripts expect in their
     /// environment (`npm_config_user_agent`, `PATH` with a `node` shim, …)
     /// added on first call.
-    pub(crate) fn configure_env_for_scripts(
-        &mut self,
-        ctx: Command::Context,
-        log_level: package_manager_options::LogLevel,
-    ) -> Result<&mut dot_env::Loader, Error> {
+    pub(crate) fn configure_env_for_scripts(&mut self) -> Result<&mut dot_env::Loader, Error> {
         if !CONFIGURED_ENV_FOR_SCRIPTS.load(Ordering::Acquire) {
-            configure_env_for_scripts_run(self, ctx, log_level)?;
+            configure_env_for_scripts_run(self)?;
             CONFIGURED_ENV_FOR_SCRIPTS.store(true, Ordering::Release);
         }
         Ok(self.env_mut())
@@ -984,12 +980,7 @@ impl PackageManager {
 
 static CONFIGURED_ENV_FOR_SCRIPTS: AtomicBool = AtomicBool::new(false);
 
-fn configure_env_for_scripts_run(
-    this: &mut PackageManager,
-    ctx: Command::Context,
-    log_level: package_manager_options::LogLevel,
-) -> Result<(), Error> {
-    let _ = (ctx, log_level);
+fn configure_env_for_scripts_run(this: &mut PackageManager) -> Result<(), Error> {
     // We need to figure out the PATH and other environment variables
     // to do that, we re-use the code from bun run
     // this is expensive, it traverses the entire directory tree going up to the root
@@ -1196,7 +1187,7 @@ fn http_thread_on_init_error(err: http::InitError, opts: &http::http_thread::Ini
     // stored slice length INCLUDES the trailing NUL. Re-derive the `&ZStr`
     // (NUL-stripped) once and use it for both the path resolver and the error
     // message so we don't print a literal `\0`.
-    // SAFETY: trailing-NUL invariant established by `init()` for any non-empty
+    // Trailing-NUL invariant established by `init()` for any non-empty
     // value; the empty default (`b""`) maps to `ZStr::EMPTY`.
     let abs_ca_z: &ZStr = if opts.abs_ca_file_name.is_empty() {
         ZStr::EMPTY
@@ -1569,7 +1560,6 @@ pub fn init(
                 package_json_path_buf[this_cwd.len()..this_cwd.len() + b"/package.json".len()]
                     .copy_from_slice(b"/package.json");
                 package_json_path_buf[this_cwd.len() + b"/package.json".len()] = 0;
-                // SAFETY: NUL written above
                 let package_json_path = ZStr::from_buf(
                     &package_json_path_buf[..],
                     this_cwd.len() + b"/package.json".len(),
@@ -1814,8 +1804,7 @@ pub fn init(
     bun_sys::chdir(&top_level_dir_z)?;
     // `loadConfig` was moved down into `bun_bunfig`
     // (MOVE_DOWN b0) so install can call it directly — no fn-pointer hook.
-    // (`::`-qualified because `crate::bun_bunfig` is a legacy local shim mod.)
-    ::bun_bunfig::arguments::load_config(
+    bun_bunfig::arguments::load_config(
         bun_options_types::command_tag::Tag::InstallCommand,
         cli.config,
         ctx,
@@ -1930,7 +1919,6 @@ pub fn init(
         bun_sys::WindowsSymlinkOptions::set_has_failed_to_create_symlink(true);
     }
 
-    // SAFETY: main-thread init
     if PackageManager::verbose_install() {
         bun_core::pretty_errorln!("Cache Dir: {}", bstr::BStr::new(&options.cache_directory));
         Output::flush();

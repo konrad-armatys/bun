@@ -45,18 +45,6 @@ pub(crate) mod bun_progress {
     pub(crate) use bun_core::Progress::{Node, Progress};
 }
 
-/// `bun_bunfig` → config-loading entrypoint. The real `bun_bunfig` crate now
-/// hosts `Arguments::loadConfig` (MOVE_DOWN b0); this local shim only adds the
-/// legacy `Arguments` alias (= `bun_options_types::context`) that
-/// `hoisted_install` / `isolated_install` import for `Transpiler::init`
-/// plumbing. Kept as a local module so those callers don't need updating; the
-/// crate-root `bun_bunfig` name shadows the extern crate, so callers needing
-/// the real crate spell it `::bun_bunfig`.
-pub(crate) mod bun_bunfig {
-
-    pub(crate) use bun_options_types::context as Arguments;
-}
-
 use core::fmt;
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -566,17 +554,14 @@ impl RunCommand {
 
             const NODE_LINK: &ZStr = {
                 const B: &[u8] = concatcp!(RunCommand::BUN_NODE_DIR, "/node\0").as_bytes();
-                // SAFETY: literal ends in NUL; len excludes it.
                 ZStr::from_static(B)
             };
             const BUN_LINK: &ZStr = {
                 const B: &[u8] = concatcp!(RunCommand::BUN_NODE_DIR, "/bun\0").as_bytes();
-                // SAFETY: literal ends in NUL; len excludes it.
                 ZStr::from_static(B)
             };
             const DIR_Z: &ZStr = {
                 const B: &[u8] = concatcp!(RunCommand::BUN_NODE_DIR, "\0").as_bytes();
-                // SAFETY: literal ends in NUL; len excludes it.
                 ZStr::from_static(B)
             };
 
@@ -708,8 +693,6 @@ impl RunCommand {
                         win::Win32Error::ALREADY_EXISTS => {}
                         _ => {
                             target_path_buffer[dir_slice_len] = 0;
-                            // SAFETY: `dir_slice_len` is in-bounds; the byte at
-                            // `dir_slice_len` was just set to NUL.
                             let dir_w =
                                 bun_core::WStr::from_buf(&target_path_buffer[..], dir_slice_len);
                             let _ = bun_sys::mkdir_w(dir_w);

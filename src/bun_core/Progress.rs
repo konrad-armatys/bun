@@ -302,6 +302,10 @@ impl Node {
         self.name = b"";
     }
 
+    /// Create a new child progress node. Thread-safe.
+    /// Call `Node.end` when done.
+    /// You probably want to call `activate` on the return value.
+    /// Passing 0 for `estimated_total_items` means unknown.
     pub fn start(&mut self, name: &'static [u8], estimated_total_items: usize) -> Node {
         Node {
             context: self.context,

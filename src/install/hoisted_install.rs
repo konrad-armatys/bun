@@ -8,7 +8,6 @@ use bun_paths::SEP;
 use bun_sys::{self as sys, Dir, Fd};
 
 use crate::analytics;
-use crate::bun_bunfig::Arguments as Command;
 use crate::bun_fs::FileSystem;
 use crate::bun_progress::{Node as ProgressNode, Progress};
 
@@ -79,7 +78,6 @@ impl run_tasks::RunTasksCtx for PackageInstaller<'_> {
 
 pub(crate) fn install_hoisted_packages(
     this: &mut PackageManager,
-    ctx: Command::Context,
     workspace_filters: &[WorkspaceFilter],
     install_root_dependencies: bool,
     log_level: package_manager::Options::LogLevel,
@@ -97,7 +95,7 @@ pub(crate) fn install_hoisted_packages(
             workspace_filters,
             packages_to_install,
         )?;
-        install_filtered(this, ctx, log_level)
+        install_filtered(this, log_level)
     })();
 
     // Restore-buffers: side-effecting rollback, not a free — `filter()`
@@ -110,7 +108,6 @@ pub(crate) fn install_hoisted_packages(
 
 fn install_filtered(
     this: &mut PackageManager,
-    ctx: Command::Context,
     log_level: package_manager::Options::LogLevel,
 ) -> crate::Result<package_install::Summary> {
     let mut install_node: ProgressNode = ProgressNode::default();
@@ -127,7 +124,7 @@ fn install_filtered(
         this.scripts_node = Some(scripts_node);
     }
 
-    let result = install_with_progress(this, ctx, log_level, &mut install_node);
+    let result = install_with_progress(this, log_level, &mut install_node);
 
     if log_level.show_progress() {
         this.progress.root.end();
@@ -141,7 +138,6 @@ fn install_filtered(
 
 fn install_with_progress(
     this: &mut PackageManager,
-    ctx: Command::Context,
     log_level: package_manager::Options::LogLevel,
     install_node: &mut ProgressNode,
 ) -> crate::Result<package_install::Summary> {
@@ -295,7 +291,6 @@ fn install_with_progress(
             summary: &mut summary,
             force_install,
             successfully_installed: Bitset::init_empty(pkg_len)?,
-            command_ctx: ctx,
             tree_ids_to_trees_the_id_depends_on,
             completed_trees,
             trees: (0..trees_count)

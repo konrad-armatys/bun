@@ -819,7 +819,6 @@ pub(crate) fn load(
             #[allow(clippy::single_match)]
             match resolution.tag {
                 ResolutionTag::Workspace => {
-                    // SAFETY: tag == Workspace discriminates the active union field.
                     lockfile
                         .workspace_paths
                         .put(name_hash, *resolution.workspace())?;

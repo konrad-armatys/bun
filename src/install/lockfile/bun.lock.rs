@@ -427,8 +427,6 @@ impl Stringifier {
                         writer,
                         indent,
                         workspace_pkg_id,
-                        // SAFETY: `workspace_sort_buf` only contains pkgs whose
-                        // resolution `tag == Workspace`.
                         *res.workspace(),
                         pkg_names,
                         pkg_name_hashes,
@@ -949,9 +947,6 @@ impl Stringifier {
                             )?;
 
                             // only write the registry if it's not the default. empty string means default registry
-                            // SAFETY: `tag == Npm` in this match arm.
-                            // `String::slice` ties the return to `&self` as well as `buf`, so
-                            // bind the union read to a local instead of slicing a temporary.
                             let url = res.npm().url;
                             let url_slice = url.slice(buf);
                             write!(
@@ -3479,7 +3474,7 @@ fn map_dep_to_pkg(
         let res = &pkg_resolutions[pkg_id as usize];
         if res.tag == ResolutionTag::Workspace {
             // Whole-struct assign so `DependencyVersion::Drop` frees any prior
-            // npm chain. SAFETY: `res.tag == Workspace` checked above.
+            // npm chain.
             let literal = dep.version.literal;
             dep.version = DependencyVersion {
                 tag: DependencyVersionTag::Workspace,

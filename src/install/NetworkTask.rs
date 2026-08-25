@@ -656,9 +656,6 @@ impl NetworkTask {
     ) -> Result<(), ForTarballError> {
         let tarball_url = tarball_.url.slice();
         let mut url_buf: Box<[u8]> = if tarball_url.is_empty() {
-            // SAFETY: `value` is the `Npm` variant on this code path —
-            // `for_tarball` is only reached for npm tarball downloads
-            // (callers gate on `resolution.tag == .npm`).
             let version = tarball_.resolution.npm().version;
             Box::from(extract_tarball::build_url(
                 scope.url.href(),

@@ -217,10 +217,8 @@ pub trait ResolverContext {
             false,
             "ResolverContext::resolution called on non-git resolver"
         );
-        // SAFETY: unreachable in practice; never dereferenced when the
-        // `IS_GIT_RESOLVER` gate is false. `ZEROED` is an associated const on a
-        // trait-bounded generic impl, which Rust refuses to evaluate in `const`
-        // position; a `static` (with `Sync` POD payload) sidesteps that.
+        // Unreachable in practice; never read when the `IS_GIT_RESOLVER`
+        // gate is false.
         static EMPTY: ResolutionType<u64> = ResolutionType::<u64>::ZEROED;
         &EMPTY
     }
@@ -1937,9 +1935,6 @@ impl Package<u64> {
 
                     dependency_version.value.workspace = path;
                 } else if features.is_main || features.is_workspace {
-                    // SAFETY: tag == Workspace selects the `workspace` union member.
-                    // Bind the (Copy) union field first so `slice()`'s `&self`
-                    // borrow has a named place to point at.
                     let workspace_str = *dependency_version.workspace();
                     let mut rel_buf = PathBuffer::uninit();
                     let rel: &[u8] = {

@@ -88,7 +88,6 @@ impl SecurityScanResults {
 
 fn do_partial_install_of_security_scanner(
     manager: &mut PackageManager,
-    ctx: CommandContext,
     log_level: crate::package_manager::Options::LogLevel,
     security_scanner_pkg_id: PackageID,
 ) -> Result<(), Error> {
@@ -108,7 +107,6 @@ fn do_partial_install_of_security_scanner(
         | bun_install_types::NodeLinker::NodeLinker::Auto => {
             HoistedInstall::install_hoisted_packages(
                 manager,
-                ctx,
                 &[],
                 true,
                 log_level,
@@ -118,7 +116,6 @@ fn do_partial_install_of_security_scanner(
         bun_install_types::NodeLinker::NodeLinker::Isolated => {
             IsolatedInstall::install_isolated_packages(
                 manager,
-                ctx,
                 true,
                 &[],
                 packages_to_install,
@@ -281,7 +278,7 @@ fn scan_installing_scanner_if_needed(
         ScanAttemptResult::NeedsInstall(pkg_id) => {
             bun_core::prettyln!("<r><yellow>Attempting to install security scanner from npm...<r>");
             let log_level = manager.options.log_level;
-            do_partial_install_of_security_scanner(manager, command_ctx, log_level, pkg_id)?;
+            do_partial_install_of_security_scanner(manager, log_level, pkg_id)?;
             bun_core::prettyln!("<r><green><b>Security scanner installed successfully.<r>");
 
             let retry_result = attempt_security_scan_with_retry(
@@ -748,9 +745,6 @@ impl<'a> JSONBuilder<'a> {
                 json_buf.extend_from_slice(b",\n");
             }
 
-            // SAFETY: `PackageCollector::process_queue` only inserts packages
-            // whose resolution tag is `Tag::Npm` into `package_paths`, so the
-            // `npm` union variant is the active field here.
             let npm = pkg_res.npm();
             if dep_id == invalid_dependency_id {
                 write!(

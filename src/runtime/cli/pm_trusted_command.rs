@@ -231,11 +231,7 @@ impl TrustCommand {
         }
     }
 
-    pub(crate) fn exec(
-        ctx: Command::Context,
-        pm: &mut PackageManager,
-        args: &[&[u8]],
-    ) -> crate::Result<()> {
+    pub(crate) fn exec(pm: &mut PackageManager, args: &[&[u8]]) -> crate::Result<()> {
         bun_core::pretty_error!(
             "<r><b>bun pm trust <r><d>v{}<r>\n",
             Global::package_json_version_with_sha,
@@ -464,7 +460,6 @@ impl TrustCommand {
                 let output_in_foreground = false;
                 let optional = false;
                 pm.spawn_package_lifecycle_scripts(
-                    &mut *ctx,
                     info.scripts_list.clone(),
                     optional,
                     output_in_foreground,

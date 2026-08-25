@@ -548,7 +548,7 @@ Learn more about these at <magenta>https://bun.com/docs/cli/pm<r>.\n";
             UntrustedCommand::exec(&mut *ctx, pm, args)?;
             Global::exit(0);
         } else if strings::eql_comptime(subcommand, b"trust") {
-            TrustCommand::exec(&mut *ctx, pm, args)?;
+            TrustCommand::exec(pm, args)?;
             Global::exit(0);
         } else if strings::eql_comptime(subcommand, b"ls") {
             let log_level = pm.options.log_level;

@@ -683,7 +683,6 @@ fn update_package_json_and_install_with_manager_with_updates(
             add_catalog::edit_root_entry_before_install(manager, root_package_json_path)?;
         }
 
-        // SAFETY: root_package_json_path_buf[root_package_json_path_len] == 0 written above
         break 'root_package_json_path ZStr::from_buf(
             &root_package_json_path_buf[..],
             root_package_json_path_len,
@@ -828,7 +827,7 @@ pub fn update_package_json_and_install_and_cli(
     cli: CommandLineArguments,
 ) -> Result<(), Error> {
     let update_groups = cli.update_groups;
-    let (manager_ptr, original_cwd) = 'brk: {
+    let (manager, original_cwd) = 'brk: {
         match super::init(ctx, cli.clone(), subcommand) {
             Ok(v) => v,
             Err(e) => {
@@ -861,10 +860,6 @@ pub fn update_package_json_and_install_and_cli(
     // `defer ctx.allocator.free(original_cwd)` — `original_cwd: Box<[u8]>` drops at scope exit.
     let _original_cwd_owner: Box<[u8]> = original_cwd;
     let original_cwd: &[u8] = &_original_cwd_owner;
-    // SAFETY: `super::init` returns a `*mut PackageManager` to the process-static
-    // singleton. We are on the single CLI thread; no worker
-    // threads deref `get()` until `install_with_manager` spawns the HTTP thread.
-    let manager: &mut PackageManager = &mut *manager_ptr;
 
     if manager.options.should_print_command_name() {
         // `concatcp!` yields `&'static str`, but `format_args!` requires a string *literal*

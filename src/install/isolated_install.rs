@@ -40,7 +40,6 @@ use bun_sys::{self as sys, Fd};
 use bun_wyhash::{Wyhash, Wyhash11};
 
 use crate::analytics;
-use crate::bun_bunfig::Arguments as Command;
 use crate::bun_progress::{Node as ProgressNode, Progress};
 use crate::dependency::Behavior;
 use crate::lifecycle_script_runner::EntryEvent;
@@ -222,12 +221,7 @@ impl run_tasks::RunTasksCtx for store::Installer<'_> {
                         slot.set(Some(list));
                         clone
                     };
-                    // reshaped for borrowck — `Command::Context<'a>`
-                    // is `&'a mut ContextData`; reborrow instead of moving the
-                    // field out of `*self`.
-                    let command_ctx: Command::Context<'_> = &mut *self.command_ctx;
                     let spawn_res = self.manager.spawn_package_lifecycle_scripts(
-                        command_ctx,
                         list_val,
                         optional,
                         false,
@@ -831,8 +825,6 @@ pub(crate) fn build_store(
                             break 'resolved_pkg_id (ids.pkg_id, false);
                         }
 
-                        // SAFETY: tag was checked == .Npm directly above for both
-                        // `peer_dep.version` and `res`.
                         let peer_dep_version = &peer_dep.version.npm().version;
                         let res_version = &res.npm().version;
 
@@ -1211,7 +1203,6 @@ pub(crate) fn build_store(
 /// Runs on main thread
 pub(crate) fn install_isolated_packages(
     manager: &mut PackageManager,
-    command_ctx: Command::Context,
     install_root_dependencies: bool,
     workspace_filters: &[WorkspaceFilter],
     packages_to_install: Option<&[PackageID]>,
@@ -2071,7 +2062,6 @@ pub(crate) fn install_isolated_packages(
         let mut installer = store::Installer {
             manager,
             shared,
-            command_ctx,
             installed,
             install_node: if show_progress {
                 Some(&mut install_node)

@@ -821,7 +821,6 @@ impl Options {
                 log.level = bun_ast::Level::Err;
                 bun_ast::DEFAULT_LOG_LEVEL.store(bun_ast::Level::Err);
             }
-            // SAFETY: main-thread CLI option load — single writer.
             super::PackageManager::set_verbose_install(cli.log_level.is_verbose());
 
             if cli.no_verify {
@@ -922,7 +921,6 @@ impl Options {
             } else {
                 LogLevel::Default
             };
-            // SAFETY: main-thread CLI option load — single writer.
             super::PackageManager::set_verbose_install(false);
         }
 

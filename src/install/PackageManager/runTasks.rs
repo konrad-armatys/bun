@@ -1106,9 +1106,6 @@ fn process_resolve_task(
                             // above) — fall back to the clone task's own
                             // resolution so the originating entry is still
                             // released.
-                            // SAFETY: `clone.res.tag == Git` — git-clone tasks are
-                            // only enqueued for git resolutions; `value.git` is
-                            // the active union arm.
                             let resolved = &clone.res.git().resolved;
                             let checkout_id =
                                 Task::Id::for_git_checkout(url, manager.lockfile.str(resolved));
@@ -1233,9 +1230,6 @@ fn process_resolve_task(
                     let err = task.err.unwrap_or(crate::Error::Failed);
 
                     if flags.has_on_package_download_error && flags.is_store_installer {
-                        // SAFETY: `resolution.tag == Git` — git-checkout tasks are
-                        // only enqueued for git resolutions; `value.git` is the
-                        // active union arm.
                         let repo = manager.lockfile.str(&resolution.git().repo).to_vec();
                         ctx.on_package_download_error_store(
                             task.id,
@@ -1466,8 +1460,6 @@ pub fn drain_dependency_list(this: &mut PackageManager) {
     // Step 2. If there were cached dependencies, go through all of those but don't download the devDependencies for them.
     flush_dependency_queue(this);
 
-    // SAFETY: `VERBOSE_INSTALL` is only mutated during single-threaded options
-    // parsing; reads here are race-free in practice.
     if PackageManager::verbose_install() {
         Output::flush();
     }

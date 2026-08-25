@@ -290,8 +290,6 @@ where
             use bun_install::dependency::version::Tag;
             const SEP_WINDOWS: u8 = b'\\';
             for dep in remaining {
-                // SAFETY: `dep.version.value` is a tag-discriminated union; each
-                // arm reads only the field corresponding to `dep.version.tag`.
                 match dep.version.tag {
                     Tag::Folder => {
                         let folder = lockfile.str(dep.version.folder());
