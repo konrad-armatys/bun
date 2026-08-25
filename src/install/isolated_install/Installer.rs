@@ -488,8 +488,8 @@ impl<'a> Installer<'a> {
             Relink::Off | Relink::Pending | Relink::Changed => state,
         };
         if Environment::CI_ASSERT {
-            // .monotonic is okay because we should have already synchronized with the completed
-            // task thread by virtue of popping from the `UnboundedQueue`.
+            // Relaxed is okay: this result was taken out under the `task_queue` lock, which
+            // synchronizes with the completed task thread.
             assert!(
                 self.store.entries.items_step()[entry_id.get() as usize].load(Ordering::Relaxed)
                     == Step::Done as u32,

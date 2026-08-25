@@ -230,8 +230,8 @@ impl run_tasks::RunTasksCtx for store::Installer<'_> {
                         Some(entry_id),
                     );
                     if let Err(err) = spawn_res {
-                        // .monotonic is okay for the same reason as `.done`: we popped this
-                        // task from the `UnboundedQueue`, and the task is no longer running.
+                        // Relaxed is okay for the same reason as `Done`: this result came out of
+                        // the `task_queue` lock, and the task is no longer running.
                         self.store.entries.items_step()[entry_id.get() as usize]
                             .store(installer::Step::Done as u32, Ordering::Relaxed);
                         self.on_task_fail(entry_id, &installer::TaskError::RunScripts(err));
@@ -2641,9 +2641,9 @@ pub(crate) fn install_isolated_packages(
                 store.entries.items_step().iter().enumerate()
             {
                 let entry_id = store::entry::Id::from(u32::try_from(_entry_id).expect("int cast"));
-                // .monotonic is okay because `wait_is_done` should have already synchronized with
-                // the completed task threads, via popping from the `UnboundedQueue` in `run_tasks`,
-                // and the .acquire load in `pending_task_count`.
+                // Relaxed is okay because `wait_is_done` already synchronized with the completed
+                // task threads: results are drained under the `task_queue` lock in `run_tasks`,
+                // and `pending_task_count` is an acquire load.
                 let step = entry_step.load(Ordering::Relaxed);
 
                 if step == installer::Step::Done as u32 {
