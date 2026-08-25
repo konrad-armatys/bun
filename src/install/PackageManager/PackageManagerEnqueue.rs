@@ -2049,8 +2049,6 @@ fn get_or_put_resolved_package_with_find_result(
     install_peer: bool,
     success_fn: SuccessFn,
 ) -> crate::Result<Option<ResolvedPackageResult>> {
-    // reshaped for borrowck — `is_root_dependency(&self, &mut PackageManager, …)`
-    // borrows `this.lockfile` and `this` at once. Split via raw root.
     let should_update = this.to_update
         && if !this.update_requests.is_empty() {
             // bun update <name>: every in-scope <name> row (declared or `npm:<name>@…` aliased, see update_scope); other resolutions stay pinned.
@@ -2453,7 +2451,6 @@ fn get_or_put_resolved_package(
                         this.options.minimum_release_age_ms,
                         this.options.minimum_release_age_excludes,
                     ),
-                    // SAFETY: `version.tag` discriminates the union arm.
                     dependency::version::Tag::DistTag => manifest.find_by_dist_tag_with_filter(
                         this.lockfile.str(&version.dist_tag().tag),
                         this.options.minimum_release_age_ms,
@@ -2482,7 +2479,6 @@ fn get_or_put_resolved_package(
                                 let manifest_buf: &[u8] = &manifest.string_buf;
                                 match version.tag {
                                     dependency::version::Tag::DistTag => {
-                                        // SAFETY: `version.tag == DistTag`.
                                         let tag_str = this.lockfile.str(&version.dist_tag().tag);
                                         bun_core::pretty_errorln!(
                                             "<d>[minimum-release-age]<r> <b>{}@{}<r> selected <green>{}<r> instead of <yellow>{}<r> due to {}-second filter",
@@ -2494,7 +2490,6 @@ fn get_or_put_resolved_package(
                                         );
                                     }
                                     dependency::version::Tag::Npm => {
-                                        // SAFETY: `version.tag == Npm`.
                                         let version_str = &version.npm().version.fmt(manifest_buf);
                                         bun_core::pretty_errorln!(
                                             "<d>[minimum-release-age]<r> <b>{}<r>@{}<r> selected <green>{}<r> instead of <yellow>{}<r> due to {}-second filter",

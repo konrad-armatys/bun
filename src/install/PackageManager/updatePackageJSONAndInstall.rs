@@ -546,9 +546,9 @@ fn update_package_json_and_install_with_manager_with_updates(
         root_package_json_path_buf[root_package_json_path_len] = 0;
         let root_package_json_path = &root_package_json_path_buf[..root_package_json_path_len];
 
-        // The lifetime of this pointer is only valid until the next call to `getWithPath`, which can happen after this scope.
-        // https://github.com/oven-sh/bun/issues/12288
-        // reshaped for borrowck — see `current_package_json_ptr` above.
+        // The entry is only valid until the next `get_with_path`, which can happen
+        // after this scope (https://github.com/oven-sh/bun/issues/12288), so it is
+        // re-fetched at each use.
         fn root_entry<'m>(manager: &'m mut PackageManager, path: &[u8]) -> &'m mut MapEntry {
             match manager.workspace_package_json_cache.get_with_path(
                 &mut manager.log,

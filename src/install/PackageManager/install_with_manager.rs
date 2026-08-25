@@ -626,10 +626,7 @@ pub fn install_with_manager(
     super::add_catalog::refuse_declared_positionals(manager);
 
     // This operation doesn't perform any I/O, so it should be relatively cheap.
-    // Both old and new lockfiles must stay live for the later
-    // `eql(lockfile_before_clean, ...)` checks, but `manager.lockfile: Box<Lockfile>`
-    // would move; compute the new lockfile first, then
-    // `mem::replace` so `lockfile_before_clean` owns the old box and `manager.lockfile` the new.
+    // The old lockfile stays live for the later `eql(lockfile_before_clean, ...)` checks.
     let lockfile_before_clean = Lockfile::clean_with_logger(manager, log_level)?;
     if manager.subcommand == Subcommand::Update && !manager.options.dry_run {
         Output::flush();

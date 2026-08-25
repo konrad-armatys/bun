@@ -57,13 +57,6 @@ impl PackageManager {
                     return None;
                 }
 
-                // reshaped for borrowck —
-                // `this.manifests.byNameHash(this, …, .load_from_memory, …)`
-                // would require simultaneous `&mut self.manifests`
-                // (receiver) and `&mut self` (arg). The memory-only path touches
-                // nothing on `PackageManager` besides the map, so use the
-                // disjoint-borrow helper and read `self.options` / `self.lockfile`
-                // alongside the held `&mut self.manifests` field borrow.
                 let manifest = self.manifests.in_memory(package_name, name_hash)?;
 
                 if let Some(latest_version) = manifest
