@@ -2200,6 +2200,21 @@ ${cachedExterns}
         let ok = ${symbolName(typeName, "dangerouslySetPtr")}(value, core::ptr::null_mut());
         debug_assert!(ok);
     }
+    /// Take the wrapper's \`m_ctx\` back as the \`Box\` its constructor handed
+    /// over (what its finalizer would otherwise receive), leaving the wrapper
+    /// detached. \`None\` if \`value\` is not a live \`${typeName}\` wrapper.
+    #[inline] pub fn take_ptr(value: JSValue) -> Option<::std::boxed::Box<${typeName}>> {
+        let ptr = ${symbolName(typeName, "fromJS")}(value);
+        if ptr.is_null() {
+            return None;
+        }
+        let ok = ${symbolName(typeName, "dangerouslySetPtr")}(value, core::ptr::null_mut());
+        debug_assert!(ok);
+        // SAFETY: \`m_ctx\` is the \`heap::into_raw\` allocation the wrapper owned
+        // (its finalizer reclaims it the same way); it was just cleared, so this
+        // is the only owner.
+        Some(unsafe { ::std::boxed::Box::from_raw(ptr) })
+    }
 ${gcAccessors}
 }`;
 
