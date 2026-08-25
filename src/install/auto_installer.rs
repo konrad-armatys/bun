@@ -443,13 +443,9 @@ pub fn init_for_resolver(
     bun_install: Option<&crate::bun_schema::api::BunInstall>,
     env: &mut bun_dotenv::Loader,
 ) -> core::result::Result<NonNull<dyn hooks::AutoInstaller>, bun_errno::SystemErrno> {
-    /// Address of the leaked runtime package manager.
-    struct Published(NonNull<PackageManager>);
-    // SAFETY: an address only; whoever dereferences it upholds the manager's
-    // threading rules (see `Resolver::get_package_manager`).
-    unsafe impl Send for Published {}
-    // SAFETY: as above.
-    unsafe impl Sync for Published {}
+    /// Address of the leaked runtime package manager (whoever dereferences it
+    /// upholds the manager's threading rules; see `Resolver::get_package_manager`).
+    struct Published(core::sync::atomic::AtomicPtr<PackageManager>);
     static RUNTIME_MANAGER: std::sync::OnceLock<Result<Published, crate::Error>> =
         std::sync::OnceLock::new();
 
@@ -461,11 +457,13 @@ pub fn init_for_resolver(
             crate::package_manager::CommandLineArguments::default(),
             env,
         )
-        .map(|pm| Published(NonNull::from(pm)))
+        .map(|pm| Published(core::sync::atomic::AtomicPtr::new(core::ptr::from_mut(pm))))
     });
     match result {
         Ok(Published(pm)) => {
-            let pm: NonNull<dyn hooks::AutoInstaller> = *pm;
+            let pm = NonNull::new(pm.load(core::sync::atomic::Ordering::Relaxed))
+                .expect("published manager is non-null");
+            let pm: NonNull<dyn hooks::AutoInstaller> = pm;
             Ok(pm)
         }
         Err(err) => Err(match *err {
