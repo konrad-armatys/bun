@@ -7500,10 +7500,6 @@ pub mod bv2_impl {
             }
         }
 
-        /// To satisfy the interface from NewHotReloader()
-        pub fn bust_dir_cache(&mut self, path: &[u8]) -> bool {
-            self.transpiler.resolver.bust_dir_cache(path)
-        }
     }
 
     pub use bun_core::cheap_prefix_normalizer;
