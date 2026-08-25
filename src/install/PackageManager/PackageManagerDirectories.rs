@@ -115,15 +115,6 @@ impl PackageManager {
 }
 
 #[inline]
-pub fn get_cache_directory_and_abs_path(this: &mut PackageManager) -> (Fd, AbsPath) {
-    let cache_dir = get_cache_directory(this);
-    (
-        cache_dir,
-        AbsPath::from(this.cache_directory_path.as_bytes())
-            .expect("cache_directory_path is absolute"),
-    )
-}
-
 #[inline]
 pub fn get_temporary_directory(this: &mut PackageManager) -> &'static TemporaryDirectory {
     // Split get/set so the closure doesn't need to capture `this`.
