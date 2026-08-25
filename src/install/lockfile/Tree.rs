@@ -642,7 +642,6 @@ impl<'a, const METHOD: BuilderMethod> Builder<'a, METHOD> {
             tree.dependencies.len = len;
         }
 
-        // queue / sort_buf / pending_optional_peers freed by Drop; explicit deinit removed.
         // The sole caller (`Lockfile::hoist`) drops the Builder immediately after clean().
 
         slice.deinit_owned();

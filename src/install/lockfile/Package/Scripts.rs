@@ -456,8 +456,6 @@ impl List {
         }
     }
 
-    // No manual deinit: `Box<[u8]>` fields drop automatically.
-
     pub(crate) fn append_to_lockfile(&self, lockfile: &mut Lockfile) {
         for (i, maybe_script) in self.items.iter().enumerate() {
             if let Some(script) = maybe_script {

@@ -1686,8 +1686,6 @@ impl<T> PkgMap<T> {
         }
     }
 
-    // deinit → Drop (StringHashMap drops itself)
-
     fn get_or_put(
         &mut self,
         name: &[u8],

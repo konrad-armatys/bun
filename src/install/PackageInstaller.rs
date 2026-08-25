@@ -1712,7 +1712,7 @@ impl<'a> PackageInstaller<'a> {
                         //
                         // A transitive `Resolution::Folder` declared by a local `file:` package
                         // is relative to the top-level dir (`Package::parse` normalized it), so
-                        // install it from `installer.cache_dir` (the cwd, set in the switch above).
+                        // install it from `cache_dir` (the cwd, set in the switch above).
                         if resolution.tag == resolution::Tag::Folder
                             && self
                                 .manager

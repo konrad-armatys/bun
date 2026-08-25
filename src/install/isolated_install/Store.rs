@@ -190,8 +190,6 @@ impl<T> OrderedArraySet<T> {
         })
     }
 
-    // `deinit` → handled by `Drop` on `Vec<T>`; nothing to write.
-
     pub(crate) fn slice(&self) -> &[T] {
         &self.list
     }
