@@ -333,9 +333,23 @@ fn url_under(url: &bun_url::URL, base: &bun_url::URL) -> bool {
     {
         return false;
     }
-    let mut segments = bun_core::strings::tokenize(url.pathname, b"/");
-    bun_core::strings::tokenize(base.pathname, b"/")
-        .all(|expected| segments.next() == Some(expected))
+    path_under(url.pathname, base.pathname)
+}
+
+/// `url` names the registry `base` already holds credentials for, or one below it:
+/// same host and port text, no https-to-http downgrade, and `base`'s path is a
+/// segment-wise prefix of `url`'s. A registry on a sibling path of the same host
+/// inherits nothing; its own `.npmrc` line applies through the key walk instead.
+fn registry_under(url: &bun_url::URL, base: &bun_url::URL) -> bool {
+    bun_core::without_trailing_slash(url.host) == bun_core::without_trailing_slash(base.host)
+        && (url.is_https() || !base.is_https())
+        && Npm::registry::path_is_canonical(url.pathname)
+        && path_under(url.pathname, base.pathname)
+}
+
+fn path_under(path: &[u8], base: &[u8]) -> bool {
+    let mut segments = bun_core::strings::tokenize(path, b"/");
+    bun_core::strings::tokenize(base, b"/").all(|expected| segments.next() == Some(expected))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
@@ -698,12 +712,8 @@ impl Options {
                         let mut api_registry = Api::NpmRegistry::from_url(registry_);
                         // Credentials in the URL win, as they do for `registry=` in .npmrc.
                         if !api_registry.has_credentials() {
-                            let prev_url = self.scope.url.url();
                             let new_url = bun_url::URL::parse(&api_registry.url);
-                            if bun_core::without_trailing_slash(new_url.host)
-                                == bun_core::without_trailing_slash(prev_url.host)
-                                && (new_url.is_https() || !prev_url.is_https())
-                            {
+                            if registry_under(&new_url, &self.scope.url.url()) {
                                 api_registry.token = core::mem::take(&mut self.scope.token);
                                 api_registry.auth = core::mem::take(&mut self.scope.auth);
                             }
@@ -722,13 +732,7 @@ impl Options {
                     self.scope = Npm::registry::Scope::from_api(b"", api_registry, env)?;
                 } else {
                     let new_url = bun_url::URL::parse(&api_registry.url);
-                    let same_origin = {
-                        let prev_url = self.scope.url.url();
-                        bun_core::without_trailing_slash(new_url.host)
-                            == bun_core::without_trailing_slash(prev_url.host)
-                            && (new_url.is_https() || !prev_url.is_https())
-                    };
-                    if !same_origin {
+                    if !registry_under(&new_url, &self.scope.url.url()) {
                         self.scope.token = Box::default();
                         self.scope.auth = Box::default();
                         self.scope.user = Box::default();
