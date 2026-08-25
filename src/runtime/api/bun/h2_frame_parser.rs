@@ -2897,6 +2897,7 @@ impl H2FrameParser {
             && !self.is_corked()
             && self.write_buffer.get().len() <= self.write_buffer_offset.get()
             && !self.pending_header_compression_error.get()
+            && !self.transport_write_fatal.get()
         {
             self.auto_flusher.get().registered.set(false);
             if let Some(r) = self.auto_flush_ref.take() {
