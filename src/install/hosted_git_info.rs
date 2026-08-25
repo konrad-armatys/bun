@@ -229,9 +229,7 @@ impl HostedGitInfo {
     /// Given a URL-like (including shortcuts) string, parses it into a HostedGitInfo structure.
     /// The HostedGitInfo is valid only for as long as `git_url` is valid.
     pub fn from_url(git_url: &[u8]) -> Result<Option<Self>, HostedGitInfoError> {
-        // git_url_mut may carry two ownership semantics:
-        //  - It aliases `git_url`, in which case it must not be freed.
-        //  - It actually points to a new allocation, in which case it must be freed.
+        // `git_url_mut` is either `git_url` itself or a view of `git_url_owned`.
         let git_url_owned: Option<Box<[u8]>>;
         let mut git_url_mut: &[u8] = git_url;
 
