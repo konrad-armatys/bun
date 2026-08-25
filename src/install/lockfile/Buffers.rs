@@ -30,9 +30,6 @@ pub struct Buffers {
     pub string_bytes: StringBuffer,
 }
 
-// The Vec-backed field types drop automatically; no explicit `Drop` impl is
-// needed.
-
 impl Buffers {
     pub(crate) fn preallocate(&mut self, that: &Buffers) -> Result<(), bun_alloc::AllocError> {
         self.trees
