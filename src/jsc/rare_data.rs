@@ -679,7 +679,7 @@ impl RareData {
         }
     }
 
-    pub fn boring_engine(&mut self) -> *mut boring::ENGINE {
+    pub fn boring_engine(&mut self) -> Option<&boring::ENGINE> {
         // The raw `ENGINE_new()` result is cached without a null check:
         // `EVP_DigestInit_ex` tolerates a NULL engine, so OOM here degrades to
         // "no engine" rather than crashing. Debug-assert to surface it without
@@ -688,7 +688,7 @@ impl RareData {
             .boring_ssl_engine
             .get_or_insert_with(|| boring::ENGINE_new());
         debug_assert!(!ptr.is_null(), "ENGINE_new returned null");
-        ptr
+        (!ptr.is_null()).then(|| boring::ENGINE::opaque_ref(ptr))
     }
 
     pub fn default_csrf_secret(&mut self) -> &[u8] {
