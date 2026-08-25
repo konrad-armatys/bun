@@ -425,15 +425,10 @@ impl PatchTask {
 
         // 3. copy the unpatched files into temp dir
         let cache_dir_subpath_z: &ZStr = patch.cache_dir_subpath_without_patch_hash.as_zstr();
-        // Borrowck — `tempdir_name` borrows `tmpname_buf` mutably, but
-        // `PackageInstall` also wants `&mut tmpname_buf[..]` for
-        // `destination_dir_subpath_buf`. `PackageInstall` assumes
-        // `destination_dir_subpath` is a prefix slice *into*
-        // `destination_dir_subpath_buf` (see `verify_git_resolution` /
-        // `verify_package_json_name_and_version`), and that aliasing can't be
-        // expressed with `&ZStr` + `&mut [u8]`, so use a separate buffer but
-        // mirror the prefix bytes so the invariant holds for any future call
-        // that reaches those paths.
+        // `tempdir_name` borrows `tmpname_buf`, and `PackageInstall` wants its
+        // own `destination_dir_subpath_buf` whose first
+        // `destination_dir_subpath_len` bytes are the subpath, so copy the name
+        // into a separate buffer.
         let mut dest_subpath_buf = [0u8; 1024];
         dest_subpath_buf[..tempdir_name.len() + 1]
             .copy_from_slice(tempdir_name.as_bytes_with_nul());
