@@ -120,7 +120,7 @@ impl UpdateRequest {
         }
     }
 
-    /// It is incorrect to call this function before Lockfile.cleanWithLogger() because
+    /// It is incorrect to call this function before Lockfile::clean_with_logger() because
     /// resolved_name should be populated if possible.
     ///
     /// `self` needs to be a pointer! If `self` is a copy and the name returned from

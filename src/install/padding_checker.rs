@@ -64,9 +64,9 @@
 //   );
 //
 // Recursion rules:
-//   - struct / union field  → require `FieldTy: AssertNoUninitializedPadding`
-//   - [T; N] field          → require `T: AssertNoUninitializedPadding`
-//   - Option<T> field       → require `T: AssertNoUninitializedPadding`
+//   - struct / union field  → require `FieldTy: bytemuck::NoUninit`
+//   - [T; N] field          → require `T: bytemuck::NoUninit`
+//   - Option<T> field       → require `T: bytemuck::NoUninit`
 //   - pointer field         → compile_error!("Expected no pointer types in ...")
 //   - anything else         → ok
 //

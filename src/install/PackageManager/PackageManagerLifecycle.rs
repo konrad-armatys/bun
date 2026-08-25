@@ -286,7 +286,7 @@ impl PackageManager {
         );
 
         let buf = self.lockfile.buffers.string_bytes.as_slice();
-        // need to clone because this is a copy before Lockfile.cleanWithLogger
+        // need to clone because this is a copy before Lockfile::clean_with_logger
         let name = root_package.name.slice(buf);
 
         // `AutoAbsPath` is the SEP=auto alias.

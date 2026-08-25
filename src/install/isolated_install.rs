@@ -2641,8 +2641,8 @@ pub(crate) fn install_isolated_packages(
                 store.entries.items_step().iter().enumerate()
             {
                 let entry_id = store::entry::Id::from(u32::try_from(_entry_id).expect("int cast"));
-                // .monotonic is okay because `Wait.isDone` should have already synchronized with
-                // the completed task threads, via popping from the `UnboundedQueue` in `runTasks`,
+                // .monotonic is okay because `wait_is_done` should have already synchronized with
+                // the completed task threads, via popping from the `UnboundedQueue` in `run_tasks`,
                 // and the .acquire load in `pending_task_count`.
                 let step = entry_step.load(Ordering::Relaxed);
 
@@ -2660,7 +2660,7 @@ pub(crate) fn install_isolated_packages(
 
                 let deps = &store.entries.items_dependencies()[entry_id.get() as usize];
                 for dep in deps.slice() {
-                    // .monotonic is okay because `Wait.isDone` already synchronized with the tasks.
+                    // .monotonic is okay because `wait_is_done` already synchronized with the tasks.
                     let dep_step = entry_steps[dep.entry_id.get() as usize].load(Ordering::Relaxed);
                     if dep_step != installer::Step::Done as u32 {
                         log!(", parents:\n - ");
