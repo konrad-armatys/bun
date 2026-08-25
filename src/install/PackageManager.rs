@@ -201,10 +201,9 @@ pub use directories::{
     cached_github_folder_name_print_auto, cached_npm_package_folder_name,
     cached_npm_package_folder_name_print, cached_npm_package_folder_print_basename,
     cached_tarball_folder_name, cached_tarball_folder_name_print, compute_cache_dir_and_subpath,
-    fetch_cache_directory_path, get_cache_directory,
-    get_temporary_directory, global_link_dir, global_link_dir_path, is_folder_in_cache,
-    path_for_cached_npm_path, path_for_resolution, save_lockfile, setup_global_dir,
-    update_lockfile_if_needed, write_yarn_lock,
+    fetch_cache_directory_path, get_cache_directory, get_temporary_directory, global_link_dir,
+    global_link_dir_path, is_folder_in_cache, path_for_cached_npm_path, path_for_resolution,
+    save_lockfile, setup_global_dir, update_lockfile_if_needed, write_yarn_lock,
 };
 
 pub use self::package_manager_enqueue as enqueue;
