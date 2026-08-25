@@ -126,7 +126,7 @@ bun_core::comptime_string_map! {
 }
 
 pub use draft::{
-    ConfigIterator, Parser, ScopeItem, ScopeIterator, ToStringFormatter, load_npmrc,
+    ConfigIterator, Parser, RegistryKey, ScopeItem, ScopeIterator, ToStringFormatter, load_npmrc,
     load_npmrc_config,
 };
 
@@ -136,7 +136,7 @@ mod draft {
     use core::ptr;
 
     use bun_alloc::{AllocError, Arena, ArenaVec, ArenaVecExt as _};
-    use bun_api::{self, BunInstall, NpmRegistry, npm_registry};
+    use bun_api::{self, BunInstall, NpmRegistry, NpmUrlAuth, npm_registry};
     use bun_ast::E::Rope;
     use bun_ast::{E, Expr, ExprData, StoreRef};
     use bun_ast::{Loc, Log, Source};
@@ -1253,6 +1253,7 @@ mod draft {
                 }
             }
         }
+        install.url_auth = collapse_url_auth(&configs);
         diagnose_config(&configs, &sources, &registries, &mut log);
         report_log(&mut log);
     }
@@ -1320,7 +1321,7 @@ mod draft {
     /// A registry as the walk sees it. npm builds the key from a WHATWG URL, whose
     /// `host` is lowercased and drops a default port; `bun_url` does neither, so the
     /// authority is normalized here, the same way `normalize_key` folds config keys.
-    struct RegistryKey {
+    pub struct RegistryKey {
         /// `<host><pathname>/`: npm's key for the registry itself, and where the walk
         /// starts (`regFetch` appends `/<pkg>` to the registry URL and the first
         /// iteration of the walk strips it right back off).
@@ -1328,11 +1329,11 @@ mod draft {
     }
 
     impl RegistryKey {
-        fn from_url(url_bytes: &[u8]) -> RegistryKey {
+        pub fn from_url(url_bytes: &[u8]) -> RegistryKey {
             Self::from_parsed(&URL::parse(url_bytes))
         }
 
-        fn from_parsed(url: &URL<'_>) -> RegistryKey {
+        pub fn from_parsed(url: &URL<'_>) -> RegistryKey {
             let default_port = default_port_for(url.protocol);
             let host = if default_port.is_some_and(|port| url.port == port) {
                 url.hostname
@@ -1352,7 +1353,7 @@ mod draft {
 
         /// npm's `regFromURI`: this key, then one component shorter each time, down
         /// to the bare host. For `h/a/` that is `h/a/`, `h/a`, `h/`, `h`.
-        fn walk(&self) -> impl Iterator<Item = Vec<u8>> {
+        pub fn walk(&self) -> impl Iterator<Item = Vec<u8>> {
             let mut next = Some(self.key.to_vec());
             core::iter::from_fn(move || {
                 let current = next.take()?;
@@ -1460,6 +1461,35 @@ mod draft {
         let count = bun_base64::decode_lenient(&mut decoded[..], value, false);
         decoded.truncate(count);
         decoded.into_boxed_slice()
+    }
+
+    /// One entry per config key that carries a complete credential, for the lookups
+    /// that only know their URL at request time (`--registry`, `$NPM_CONFIG_REGISTRY`,
+    /// tarballs). The same `has_auth` as the load-time walk, so both agree.
+    fn collapse_url_auth(configs: &[ConfigItem]) -> Vec<NpmUrlAuth> {
+        let mut out: Vec<NpmUrlAuth> = Vec::new();
+        for conf_item in configs {
+            if out
+                .iter()
+                .any(|entry| *entry.key == *conf_item.registry_url)
+            {
+                continue;
+            }
+            let Some(auth) = has_auth(configs, &conf_item.registry_url) else {
+                continue;
+            };
+            let mut credentials = NpmRegistry::default();
+            Credentials {
+                auth: Some(auth),
+                email: None,
+            }
+            .apply(&mut credentials);
+            out.push(NpmUrlAuth {
+                key: conf_item.registry_url.clone(),
+                credentials,
+            });
+        }
+        out
     }
 
     impl<'a> Credentials<'a> {
@@ -1579,6 +1609,7 @@ mod draft {
         let mut configs: Vec<ConfigItem> = Vec::new();
         parse_npmrc_into(install, env, log, source, 0, &mut configs)?;
         let registries = resolve_credentials(install, &configs);
+        install.url_auth = collapse_url_auth(&configs);
         diagnose_config(&configs, std::slice::from_ref(source), &registries, log);
         Ok(())
     }

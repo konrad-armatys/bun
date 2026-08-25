@@ -428,6 +428,18 @@ pub mod registry {
             self.url_hash = Self::hash(strings::without_trailing_slash(self.url.href()));
         }
 
+        /// Whether requests to this scope carry an `Authorization` header.
+        pub(crate) fn has_credentials(&self) -> bool {
+            !self.token.is_empty() || !self.auth.is_empty()
+        }
+
+        /// Take `other`'s credentials, leaving this scope's registry URL as is.
+        pub(crate) fn copy_credentials_from(&mut self, other: &Scope) {
+            self.token.clone_from(&other.token);
+            self.auth.clone_from(&other.auth);
+            self.user.clone_from(&other.user);
+        }
+
         pub(crate) fn get_name(name: &[u8]) -> &[u8] {
             if name.is_empty() || name[0] != b'@' {
                 return name;
@@ -564,6 +576,105 @@ pub mod registry {
 
     // Keys are pre-hashed (`Scope::hash`), so don't re-hash them.
     pub type Map = HashMap<u64, Scope, bun_collections::IdentityContext<u64>>;
+
+    /// One `.npmrc` credential key with the credential it collapsed to, matched
+    /// against request URLs with npm's walk (`regFromURI`): build the request's own
+    /// key, then try it and every shorter key down to the bare host. Keys carry no
+    /// scheme, so a key applies to `http` and `https` alike.
+    pub(crate) struct UrlAuth {
+        /// npm's config key, already normalized by `bun_ini` (`host/path/`).
+        key: Box<[u8]>,
+        /// Only the credential fields are meaningful; `url` is empty.
+        credentials: Scope,
+    }
+
+    impl UrlAuth {
+        pub(crate) fn from_api(
+            api: &api::NpmUrlAuth,
+            env: &mut DotEnv,
+        ) -> Result<Option<UrlAuth>, AllocError> {
+            let credentials = Scope::from_api(b"", api.credentials.clone(), env)?;
+            if !credentials.has_credentials() {
+                return Ok(None);
+            }
+            Ok(Some(UrlAuth {
+                key: api.key.clone(),
+                credentials,
+            }))
+        }
+
+        /// The credentials `.npmrc` configures for `url`: the first key on npm's walk
+        /// from `url` that has an entry, so `//host/a/b/` beats `//host/`. A URL whose
+        /// path a server could resolve somewhere else (`.`/`..` segments, plain or
+        /// percent-encoded, or a backslash) gets nothing: the manifest that names a
+        /// tarball URL is registry-controlled.
+        pub(crate) fn find<'a>(list: &'a [UrlAuth], url: &URL) -> Option<&'a Scope> {
+            if list.is_empty() || !path_is_canonical(url.pathname) {
+                return None;
+            }
+            bun_ini::RegistryKey::from_parsed(url)
+                .walk()
+                .find_map(|key| list.iter().find(|entry| *entry.key == *key))
+                .map(|entry| &entry.credentials)
+        }
+    }
+
+    /// No `.`/`..` segment (plain or `%2e`-spelled), no backslash (plain or `%5c`),
+    /// and no `%2f` that splits a segment into pieces containing a dot segment. A
+    /// plain `%2f` inside a name, the `@scope%2fpkg` form manifests are requested
+    /// with, is fine.
+    pub(crate) fn path_is_canonical(path: &[u8]) -> bool {
+        if strings::contains_char(path, b'\\') || contains_percent_encoded(path, b'5', b'c') {
+            return false;
+        }
+        strings::split(path, b"/").all(|segment| !is_unsafe_segment(segment))
+    }
+
+    /// `%Xy` anywhere in `bytes`, the hex digit `y` matched case-insensitively.
+    fn contains_percent_encoded(bytes: &[u8], x: u8, y_lower: u8) -> bool {
+        let mut rest = bytes;
+        while let Some(i) = strings::index_of_char_usize(rest, b'%') {
+            rest = &rest[i + 1..];
+            if rest.len() >= 2 && rest[0] == x && rest[1].eq_ignore_ascii_case(&y_lower) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// A dot segment, or a segment that an encoded `/` (`%2f`) splits into pieces
+    /// one of which is a dot segment.
+    fn is_unsafe_segment(segment: &[u8]) -> bool {
+        if !contains_percent_encoded(segment, b'2', b'f') {
+            return is_dot_segment(segment);
+        }
+        let mut start = 0;
+        let mut i = 0;
+        while i + 2 < segment.len() {
+            if segment[i] == b'%'
+                && segment[i + 1] == b'2'
+                && segment[i + 2].eq_ignore_ascii_case(&b'f')
+            {
+                if is_dot_segment(&segment[start..i]) {
+                    return true;
+                }
+                i += 3;
+                start = i;
+            } else {
+                i += 1;
+            }
+        }
+        is_dot_segment(&segment[start..])
+    }
+
+    /// WHATWG single-dot and double-dot path segments, including the percent-encoded
+    /// spellings a server would normalize.
+    fn is_dot_segment(segment: &[u8]) -> bool {
+        const DOT_SEGMENTS: [&[u8]; 6] = [b".", b"..", b"%2e", b"%2e.", b".%2e", b"%2e%2e"];
+        DOT_SEGMENTS
+            .iter()
+            .any(|dot| segment.eq_ignore_ascii_case(dot))
+    }
 
     pub(crate) enum PackageVersionResponse {
         Cached(PackageManifest),

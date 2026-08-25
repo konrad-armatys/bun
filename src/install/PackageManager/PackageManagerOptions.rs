@@ -40,6 +40,11 @@ pub struct Options {
     pub scope: Npm::registry::Scope,
 
     pub(crate) registries: Npm::registry::Map,
+    /// `.npmrc` `//host/path/` credential keys, matched against request URLs. Fills in
+    /// a registry configured without credentials of its own (`--registry`,
+    /// `$NPM_CONFIG_REGISTRY`) and authenticates tarballs served elsewhere than their
+    /// registry's origin.
+    pub(crate) url_auth: Vec<Npm::registry::UrlAuth>,
     pub(crate) cache_directory: &'static [u8],
     pub enable: Enable,
     pub do_: Do,
@@ -127,6 +132,7 @@ impl Default for Options {
             // Always assigned in `load()` before read.
             scope: Npm::registry::Scope::default(),
             registries: Npm::registry::Map::default(),
+            url_auth: Vec::new(),
             cache_directory: b"",
             enable: Enable::default(),
             do_: Do::default(),
@@ -276,6 +282,60 @@ impl Options {
             _ => &self.scope,
         }
     }
+
+    /// The credentials a tarball download may carry.
+    ///
+    /// The manifest that names the tarball URL comes from the registry, so a hostile
+    /// registry (or another tenant on a shared host) could point `dist.tarball` where
+    /// it likes; `scope`'s own credentials therefore only go to URLs at or under
+    /// `scope`'s registry URL. Any other URL gets exactly what `.npmrc` configures
+    /// for it by key, which covers registries that serve tarballs from another host
+    /// or path and lockfiles recorded against a registry that has since moved.
+    pub(crate) fn tarball_credentials<'a>(
+        &'a self,
+        scope: &'a Npm::registry::Scope,
+        tarball: &bun_url::URL,
+    ) -> Option<&'a Npm::registry::Scope> {
+        if scope.has_credentials() && url_under(tarball, &scope.url.url()) {
+            return Some(scope);
+        }
+        Npm::registry::UrlAuth::find(&self.url_auth, tarball)
+    }
+
+    /// Give every scope that ended up without credentials the ones `.npmrc`
+    /// configures for its registry URL. `--registry` and `$NPM_CONFIG_REGISTRY` are
+    /// applied after the `.npmrc` files were read, so only this pass can serve them.
+    fn fill_credentials_from_url_auth(&mut self) {
+        if self.url_auth.is_empty() {
+            return;
+        }
+        let url_auth = &self.url_auth;
+        for scope in core::iter::once(&mut self.scope).chain(self.registries.values_mut()) {
+            if scope.has_credentials() {
+                continue;
+            }
+            if let Some(credentials) = Npm::registry::UrlAuth::find(url_auth, &scope.url.url()) {
+                scope.copy_credentials_from(credentials);
+            }
+        }
+    }
+}
+
+/// `url` is at or under `base`: same scheme, host and effective port (some registries
+/// spell out `:443` in `dist.tarball`), and `base`'s path is a segment-wise prefix of
+/// `url`'s canonical path, so `/npm/team-ab/x` is not under `/npm/team-a/`.
+fn url_under(url: &bun_url::URL, base: &bun_url::URL) -> bool {
+    if base.hostname.is_empty()
+        || !url.protocol.eq_ignore_ascii_case(base.protocol)
+        || !url.hostname.eq_ignore_ascii_case(base.hostname)
+        || url.get_port_auto() != base.get_port_auto()
+        || !Npm::registry::path_is_canonical(url.pathname)
+    {
+        return false;
+    }
+    let mut segments = bun_core::strings::tokenize(url.pathname, b"/");
+    bun_core::strings::tokenize(base.pathname, b"/")
+        .all(|expected| segments.next() == Some(expected))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Default, Debug)]
@@ -465,6 +525,12 @@ impl Options {
                         Npm::registry::Scope::hash(name),
                         Npm::registry::Scope::from_api(name, registry, env)?,
                     )?;
+                }
+            }
+
+            for url_auth in &config.url_auth {
+                if let Some(url_auth) = Npm::registry::UrlAuth::from_api(url_auth, env)? {
+                    self.url_auth.push(url_auth);
                 }
             }
 
@@ -934,6 +1000,10 @@ impl Options {
         }
 
         // moved from `defer { ... }` after scope assignment (see note above).
+        // After every source that can set a registry URL (bunfig, .npmrc,
+        // environment, command line) has been applied.
+        self.fill_credentials_from_url_auth();
+
         self.did_override_default_scope = self.scope.url_hash != *Npm::registry::DEFAULT_URL_HASH;
 
         // The manifest cache is the data source for --prefer-offline/--offline; keep it on

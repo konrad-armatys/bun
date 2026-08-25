@@ -203,6 +203,19 @@ pub mod api {
     /// same type.
     pub use bun_install_types::NodeLinker::{NodeLinker, PnpmMatcher};
 
+    /// The credential one `.npmrc` key resolved to (`//host/path/:_authToken=...`,
+    /// `:_auth=`, or `:username=` + `:_password=`), kept past config loading so the
+    /// package manager can match it against the URL of each request: a registry set
+    /// with `--registry` or `$NPM_CONFIG_REGISTRY`, and a tarball served under another
+    /// path or host than its registry, are only known then.
+    #[derive(Clone, Debug, Default)]
+    pub struct NpmUrlAuth {
+        /// npm's config key as written between `//` and `:<opt>=`, e.g. `host/path/`.
+        pub key: Box<[u8]>,
+        /// Only `token`, `auth`, `username` and `password` are set; `url` stays empty.
+        pub credentials: NpmRegistry,
+    }
+
     /// Full field set.
     /// `Default` is every field `None`/empty.
     ///
@@ -214,6 +227,9 @@ pub mod api {
         pub default_registry: Option<NpmRegistry>,
         /// scoped
         pub scoped: Option<NpmRegistryMap>,
+        /// One entry per `.npmrc` credential key that carries a complete credential,
+        /// after every file was collapsed into one map.
+        pub url_auth: Vec<NpmUrlAuth>,
         /// lockfile_path
         pub lockfile_path: Option<Box<[u8]>>,
         /// save_lockfile_path
