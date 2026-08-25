@@ -2859,10 +2859,8 @@ pub(crate) fn parse_into_binary_lockfile(
                                 pkg.meta.arch =
                                     Npm::negatable_from_json_value::<Npm::Architecture>(arch);
                             }
-                            // TODO(dylan-conway)
-                            // if (os_cpu_libc_obj.get("libc")) |libc| {
-                            //     pkg.meta.libc = Negatable(Npm.Libc).fromJson(allocator, libc);
-                            // }
+                            // TODO(dylan-conway): also read "libc" into `meta.libc` via
+                            // `negatable_from_json_value::<Npm::Libc>`, like os/cpu above.
                         }
                     }
                     ResolutionTag::Root => {
