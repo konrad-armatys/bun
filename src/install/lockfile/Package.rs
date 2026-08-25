@@ -2516,7 +2516,7 @@ impl Package<u64> {
                     .parse_count(workspaces_expr, &mut string_builder);
             }
 
-            // Count catalog strings in top-level package.json as well, since parseAppend
+            // Count catalog strings in top-level package.json as well, since parse_append
             // might process them later if no catalogs were found in workspaces
             lockfile.catalogs.parse_count(json, &mut string_builder);
 

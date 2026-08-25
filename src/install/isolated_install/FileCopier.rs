@@ -70,7 +70,7 @@ impl FileCopier {
         ) {
             Ok(d) => d,
             Err(e) => {
-                // TODO: remove the need for this and implement openDir makePath makeOpenPath in bun
+                // TODO: remove the need for this and implement open_dir make_path make_open_path in bun
                 let errno: E = match e.get_errno() {
                     E::EACCES => E::EPERM,
                     other => other,

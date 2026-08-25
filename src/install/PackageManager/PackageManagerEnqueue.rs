@@ -2386,7 +2386,7 @@ fn get_or_put_resolved_package(
                         else {
                             break 'resolve_from_workspace;
                         };
-                        // make sure verifyResolutions sees this resolution as a valid package id
+                        // make sure verify_resolutions sees this resolution as a valid package id
                         success_fn(this, dependency_id, workspace_package_id);
                         return Ok(Some(ResolvedPackageResult {
                             package: *this.lockfile.packages.get(workspace_package_id as usize),
@@ -2522,7 +2522,7 @@ fn get_or_put_resolved_package(
                                     else {
                                         break 'resolve_workspace_from_dist_tag;
                                     };
-                                    // make sure verifyResolutions sees this resolution as a valid package id
+                                    // make sure verify_resolutions sees this resolution as a valid package id
                                     success_fn(this, dependency_id, workspace_package_id);
                                     return Ok(Some(ResolvedPackageResult {
                                         package: *this
@@ -2862,7 +2862,7 @@ fn patched_package_satisfying(
 // `impl PackageManager` — inherent-method facade over the free fns above.
 //
 // Sibling files (PackageManagerLifecycle, …Directories,
-// runTasks) all expose an `impl PackageManager` block. Match that
+// run_tasks) all expose an `impl PackageManager` block. Match that
 // pattern here so cross-file callers can keep the `.method()` shape.
 // ──────────────────────────────────────────────────────────────────────────
 

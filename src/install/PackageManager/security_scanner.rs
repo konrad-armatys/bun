@@ -1120,7 +1120,7 @@ impl SecurityScanSubprocess {
             },
         );
 
-        // errdefer pipe.closeAndDestroy(): libuv's close callback frees the
+        // errdefer pipe.close_and_destroy(): libuv's close callback frees the
         // allocation. Stays armed across `ipc_reader.start()` inside
         // finish_spawn (the pre-writer error window) so a registered-but-unowned
         // uv handle is never leaked; disarmed once the writer takes the pipe.
@@ -1217,7 +1217,7 @@ impl SecurityScanSubprocess {
         let json_source = subprocess::Source::from_owned_bytes(json_data_copy);
 
         // 2 = ipc_reader (fd 3) + json_writer (fd 4). Both must complete before
-        // isDone() returns true, otherwise we risk freeing this struct while
+        // is_done() returns true, otherwise we risk freeing this struct while
         // StaticPipeWriter still holds a pointer to it (child crash case).
         me.remaining_fds.set(2);
         me.ipc_reader

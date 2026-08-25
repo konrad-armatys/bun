@@ -281,7 +281,7 @@ where
             bun_core::pretty_errorln!("Saving {} {}", buffers.dependencies.len(), "dependencies");
         }
 
-        // Dependencies have to be converted to .toExternal first
+        // Dependencies have to be converted to .to_external first
         // We store pointers in Version.Value, so we can't just write it directly
         let remaining = buffers.dependencies.as_slice();
 

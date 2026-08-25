@@ -962,7 +962,7 @@ impl<'a> Linker<'a> {
 
         // We have to do an atomic replace here, use a randomly generated
         // filename in the same folder, read the entire original file
-        // contents using bun.sys.File.readFrom, then write the temporary file, then
+        // contents using bun.sys.File.read_from, then write the temporary file, then
         // overwite the old one with the new one via bun.sys.renameat. And
         // always unlink the old one. If it fails for any reason then exit
         // early.

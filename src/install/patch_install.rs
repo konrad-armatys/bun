@@ -126,7 +126,7 @@ impl PatchTask {
     fn run_owned(mut self: Box<Self>) {
         bun_output::scoped_log!(
             InstallPatch,
-            "runFromThreadPoolImpl {}",
+            "run_from_thread_pool_impl {}",
             <&'static str>::from(&self.callback)
         );
         // There are no early returns in the body, so the ordering

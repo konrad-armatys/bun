@@ -396,7 +396,7 @@ pub fn install_with_manager(
                             let pkg_name_and_version_hash = *key;
                             debug_assert!(value.patchfile_hash_is_null);
                             let gop = lf.patched_dependencies.entry(pkg_name_and_version_hash);
-                            // ArrayHashMap getOrPut semantics → entry API approximation
+                            // ArrayHashMap get_or_put semantics → entry API approximation
                             match gop {
                                 bun_collections::array_hash_map::MapEntry::Vacant(v) => {
                                     // `PatchedDep` has private padding/hash fields,
@@ -1350,7 +1350,7 @@ pub(crate) fn loaded_lockfile_name(load_result: &lockfile::DetachedLoadResult) -
 /// Adds a contextual error for a dependency resolution failure.
 /// This provides better error messages than just propagating the raw error.
 /// The error is logged to manager.log, and the install will fail later when
-/// manager.log.hasErrors() is checked.
+/// manager.log.has_errors() is checked.
 #[cold]
 #[inline(never)]
 fn add_dependency_error(manager: &mut PackageManager, dependency: &Dependency, err: crate::Error) {

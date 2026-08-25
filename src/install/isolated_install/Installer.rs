@@ -426,7 +426,7 @@ impl<'a> Installer<'a> {
     pub(crate) fn on_task_blocked(&mut self, entry_id: StoreEntryId) {
         // race condition (fixed now): task decides it is blocked because one of its dependencies
         // has not finished. before the task can mark itself as blocked, the dependency finishes its
-        // install, causing the task to never finish because resumeUnblockedTasks is called before
+        // install, causing the task to never finish because resume_unblocked_tasks is called before
         // its state is set to blocked.
         //
         // fix: check if the task is unblocked after the task returns blocked, and only set/unset
@@ -2433,7 +2433,7 @@ impl<'a> Installer<'a> {
         // Absolute target so the link is independent of where node_modules
         // lives (project root may itself be behind a symlink). Symlinker's
         // `target` field is RelPath-typed for the common in-tree case, so
-        // call sys.symlink/symlinkOrJunction directly here.
+        // call sys.symlink/symlink_or_junction directly here.
         fn do_symlink(d: &ZStr, t: &ZStr) -> sys::Result<()> {
             #[cfg(windows)]
             {

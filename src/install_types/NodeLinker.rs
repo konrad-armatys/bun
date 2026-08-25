@@ -42,7 +42,7 @@ pub mod npm {
     impl Registry {
         pub const DEFAULT_URL: &'static str = "https://registry.npmjs.org/";
 
-        /// `bun.Wyhash11.hash(0, strings.withoutTrailingSlash(default_url))`
+        /// `bun.Wyhash11.hash(0, strings.without_trailing_slash(default_url))`
         /// — i.e. hash of `b"https://registry.npmjs.org"` (no trailing `/`).
         // Computed on use because `bun_wyhash::Wyhash11::hash` is not a
         // `const fn` (only `Wyhash::hash_const` — a different algorithm —
@@ -50,7 +50,7 @@ pub mod npm {
         #[inline]
         pub fn default_url_hash() -> u64 {
             use bun_wyhash::Wyhash11;
-            // strings.withoutTrailingSlash strips exactly one trailing '/'.
+            // strings.without_trailing_slash strips exactly one trailing '/'.
             Wyhash11::hash(
                 0,
                 &Self::DEFAULT_URL.as_bytes()[..Self::DEFAULT_URL.len() - 1],

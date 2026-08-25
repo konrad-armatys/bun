@@ -769,7 +769,7 @@ impl CommandLineArguments {
         // use <bar> to emphasize 'bar'
 
         match subcommand {
-            // fall back to HelpCommand.printWithReason
+            // fall back to HelpCommand.print_with_reason
             Subcommand::Install => {
                 let intro_text = r"
 <b>Usage<r>: <b><green>bun install<r> <cyan>[flags]<r> <blue>\<name\><r><d>@\<version\><r>

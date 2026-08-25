@@ -168,13 +168,13 @@ impl WorkspacePackageJSONCache {
         }
 
         // Owned NUL-terminated copy reused
-        // both as the map key and the path handed to `File.toSource`. The
+        // both as the map key and the path handed to `File.to_source`. The
         // returned `Source` *borrows* its `path` slices from this allocation,
         // so it must outlive the cached `MapEntry` (stored as
         // `value.path_storage` below).
         let key = bun_core::ZBox::from_bytes(path);
 
-        // MOVE_DOWN: `bun.sys.File.toSource` lives in `bun_logger` (T1 → T2
+        // MOVE_DOWN: `bun.sys.File.to_source` lives in `bun_logger` (T1 → T2
         // cyclebreak; `bun_sys` cannot name `Source`).
         let source = match bun_ast::to_source(&key, Default::default()) {
             Ok(s) => s,

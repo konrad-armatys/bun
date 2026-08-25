@@ -801,7 +801,7 @@ impl<'a> StorePathFormatter<'a> {
     /// need an on-disk store path (legal non-UTF-8 on Linux) must use this, not `Display`.
     pub(crate) fn write_to<W: std::io::Write>(&self, w: &mut W) -> std::io::Result<()> {
         // if (!this.opts.replace_slashes) {
-        //     try writer.writeAll(this.str);
+        //     try writer.write_all(this.str);
         //     return;
         // }
         for &c in self.str {

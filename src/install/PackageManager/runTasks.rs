@@ -980,7 +980,7 @@ fn process_resolve_task(
                     // on this same tarball can resolve; see `AppendedTaskPackageMap`.
                     manager.appended_task_packages.insert(task.id, pkg.meta.id);
                     // In the middle of an install, you could end up needing to downlaod the github tarball for a dependency
-                    // We need to make sure we resolve the dependencies first before calling the onExtract callback
+                    // We need to make sure we resolve the dependencies first before calling the on_extract callback
                     if let Some(entry) = manager.task_queue.get_mut(&task.id) {
                         let dependency_list: TaskCallbackList = core::mem::take(entry);
                         let any_root = Cell::new(false);
@@ -1014,7 +1014,7 @@ fn process_resolve_task(
                                         )?;
                                     }
                                     _ => {
-                                        // if it's a node_module folder to install, handle that after we process all the dependencies within the onExtract callback.
+                                        // if it's a node_module folder to install, handle that after we process all the dependencies within the on_extract callback.
                                         manager.task_queue.get_mut(&task.id).unwrap().push(dep);
                                     }
                                 }
@@ -1304,7 +1304,7 @@ fn process_resolve_task(
                                         )?;
                                     }
                                     _ => {
-                                        // if it's a node_module folder to install, handle that after we process all the dependencies within the onExtract callback.
+                                        // if it's a node_module folder to install, handle that after we process all the dependencies within the on_extract callback.
                                         manager.task_queue.get_mut(&task.id).unwrap().push(dep);
                                     }
                                 }

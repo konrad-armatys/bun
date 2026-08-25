@@ -552,7 +552,7 @@ impl RepositoryExt for Repository {
             // to avoid the allocation and copy here. For now, the thread-local buffer is a good
             // enough solution to avoid having to handle init/deinit.
 
-            // Fix malformed ssh:// URLs with colons using hosted_git_info.correctUrl
+            // Fix malformed ssh:// URLs with colons using hosted_git_info.correct_url
             // ssh://git@github.com:user/repo -> ssh://git@github.com/user/repo
             let pair = hosted_git_info::UrlProtocolPair {
                 url: hosted_git_info::UrlProtocolPairUrl::Unmanaged(url),
@@ -1061,7 +1061,7 @@ impl<'a> fmt::Display for StorePathFormatter<'a> {
                 "{}",
                 self.repo.owner.fmt_store_path(self.string_buf)
             )?;
-            // try writer.writeByte(if (this.opts.replace_slashes) '+' else '/');
+            // try writer.write_byte(if (this.opts.replace_slashes) '+' else '/');
             writer.write_str("+")?;
         } else if Dependency::is_scp_like_path(self.repo.repo.slice(self.string_buf)) {
             // try writer.print("ssh:{s}", .{if (this.opts.replace_slashes) "++" else "//"});

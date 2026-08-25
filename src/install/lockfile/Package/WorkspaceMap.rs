@@ -218,7 +218,7 @@ fn process_workspace_name(
     };
     bun_output::scoped_log!(
         Lockfile,
-        "processWorkspaceName({}) = {}",
+        "process_workspace_name({}) = {}",
         BStr::new(abs_package_json_path),
         BStr::new(&entry.name)
     );

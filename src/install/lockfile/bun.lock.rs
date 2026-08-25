@@ -1177,11 +1177,11 @@ impl Stringifier {
 
         // TODO(dylan-conway)
         // if (meta.libc != .all) {
-        //     try writer.writeAll(
+        //     try writer.write_all(
         //         \\"libc": [
         //     );
-        //     try Negatable(Npm.Libc).toJson(meta.libc, writer);
-        //     try writer.writeAll("], ");
+        //     try Negatable(Npm.Libc).to_json(meta.libc, writer);
+        //     try writer.write_all("], ");
         // }
 
         if meta.os != Npm::OperatingSystem::ALL {
@@ -3718,7 +3718,7 @@ fn parse_append_dependencies<const CHECK_FOR_BUNDLED: bool, const IS_ROOT: bool>
                     },
                 };
 
-                // after parseAppendDependencies has been called for each package the
+                // after parse_append_dependencies has been called for each package the
                 // size of lockfile.buffers.resolutions is set to the length of dependencies
                 // and values set to invalid_package_id before mapping.
                 lockfile.buffers.dependencies.push(dep);

@@ -1168,7 +1168,7 @@ pub(crate) fn parse_with_tag(
             let version = match Semver::query::parse(input, sliced.sub(input)) {
                 Ok(v) => v,
                 Err(_e) => {
-                    // error.OutOfMemory => bun.outOfMemory()
+                    // error.OutOfMemory => bun.out_of_memory()
                     bun_core::out_of_memory();
                 }
             };

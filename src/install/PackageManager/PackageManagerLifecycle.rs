@@ -32,7 +32,7 @@ impl PackageManager {
         let offset = self.preinstall_state.len();
         self.preinstall_state
             .reserve(count.saturating_sub(self.preinstall_state.len()));
-        // expandToCapacity + @memset(.., .unknown)
+        // expand_to_capacity + @memset(.., .unknown)
         self.preinstall_state
             .resize(self.preinstall_state.capacity(), PreinstallState::Unknown);
         let _ = offset; // resize already fills [offset..] with Unknown

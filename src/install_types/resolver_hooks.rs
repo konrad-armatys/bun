@@ -479,7 +479,7 @@ impl DependencyVersion {
     // Every payload is POD/arena-backed (`SemverString` handles, `Repository`,
     // `ManuallyDrop<NpmInfo>` over an arena-owned linked list), so reading the
     // "wrong" variant is not UB — it yields garbage. `_mut` variants let the
-    // handful of mutate-in-place call sites (`runTasks.rs` package-name
+    // handful of mutate-in-place call sites (`run_tasks.rs` package-name
     // back-patching, `Package.rs` workspace resolution) write through the
     // active arm without an `unsafe` block apiece.
     bun_core::extern_union_accessors! {

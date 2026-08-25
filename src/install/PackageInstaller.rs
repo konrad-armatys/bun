@@ -973,10 +973,10 @@ impl<'a> PackageInstaller<'a> {
 
         // const resolution = &this.resolutions[package_id];
         // const task_id = switch (resolution.tag) {
-        //     .git => Task.Id.forGitCheckout(data.url, data.resolved),
-        //     .github => Task.Id.forTarball(data.url),
-        //     .local_tarball => Task.Id.forTarball(this.lockfile.str(&resolution.value.local_tarball)),
-        //     .remote_tarball => Task.Id.forTarball(this.lockfile.str(&resolution.value.remote_tarball)),
+        //     .git => Task.Id.for_git_checkout(data.url, data.resolved),
+        //     .github => Task.Id.for_tarball(data.url),
+        //     .local_tarball => Task.Id.for_tarball(this.lockfile.str(&resolution.value.local_tarball)),
+        //     .remote_tarball => Task.Id.for_tarball(this.lockfile.str(&resolution.value.remote_tarball)),
         //     .npm => Task.Id.forNPMPackage(name.slice(this.lockfile.buffers.string_bytes.items), resolution.value.npm.version),
         //     else => unreachable,
         // };

@@ -563,7 +563,7 @@ pub fn do_patch_commit(
         PatchFeatures::Commit { patches_dir } => patches_dir,
         // Reaching `do_patch_commit` implies `Subcommand::PatchCommit`, which always
         // sets `patch_features = .commit` in `Options::load`.
-        _ => unreachable!("patch_features must be Commit in doPatchCommit"),
+        _ => unreachable!("patch_features must be Commit in do_patch_commit"),
     };
 
     let path_in_patches_dir =
@@ -940,7 +940,7 @@ pub fn prepare_patch(manager: &mut PackageManager) -> Result<(), crate::Error> {
     //
     // With the isolated linker's global virtual store, `module_folder` is
     // reached *through* a `node_modules/.bun/<storepath>` symlink that points
-    // into `<cache>/links/`. `deleteTree(module_folder)` would follow that
+    // into `<cache>/links/`. `delete_tree(module_folder)` would follow that
     // symlink and wipe the shared global entry (and its dep symlinks)
     // underneath every other project, then FileCopier would write the user's
     // edits into the shared cache. Detach first: walk up `module_folder` to
@@ -1036,7 +1036,7 @@ fn detach_module_folder_from_shared_store(module_folder: &[u8]) {
     // `module_folder` reaches here normalised to forward slashes on every
     // platform (see `prepare_patch`). Re-normalise to the
     // platform separator so `undo()`/`basename()` walk the path correctly on
-    // Windows and the lstat/getFileAttributes calls below see a native path.
+    // Windows and the lstat/get_file_attributes calls below see a native path.
     #[cfg(windows)]
     let mut native_buf = PathBuffer::uninit();
     #[cfg(windows)]

@@ -8,7 +8,7 @@ use crate::invalid_package_id;
 use crate::lockfile::Lockfile;
 // Import the
 // *module* under the `Task` name so `Task::Id` resolves as a path (matches
-// `runTasks.rs` / `PackageManagerEnqueue.rs`).
+// `run_tasks.rs` / `PackageManagerEnqueue.rs`).
 use super::PackageManager;
 use super::enqueue;
 use super::run_tasks;

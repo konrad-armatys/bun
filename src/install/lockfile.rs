@@ -1231,7 +1231,7 @@ impl Lockfile {
             trees_count: 1,
         };
 
-        // try clone_queue.ensureUnusedCapacity(root.dependencies.len);
+        // try clone_queue.ensure_unused_capacity(root.dependencies.len);
         let _ = root.clone(&mut cloner)?;
 
         // Between here and `cloner.flush()`, `old`/`new`/`manager`
@@ -1607,7 +1607,7 @@ pub struct PendingResolution {
 pub(crate) type PendingResolutions = Vec<PendingResolution>;
 
 // ────────────────────────────────────────────────────────────────────────────
-// fetchNecessaryPackageMetadataAfterYarnOrPnpmMigration
+// fetch_necessary_package_metadata_after_yarn_or_pnpm_migration
 // ────────────────────────────────────────────────────────────────────────────
 
 impl Lockfile {
@@ -1916,7 +1916,7 @@ impl<'a> Printer<'a> {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// verifyData / saveToDisk / rootPackage / str / initEmpty
+// verify_data / save_to_disk / root_package / str / init_empty
 // ────────────────────────────────────────────────────────────────────────────
 
 impl Lockfile {

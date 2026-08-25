@@ -688,7 +688,7 @@ impl UninstallTask {
             let _ = &mut debug_timer;
             bun_output::scoped_log!(
                 install,
-                "deleteTree({}, {}) = {}",
+                "delete_tree({}, {}) = {}",
                 bstr::BStr::new(basename),
                 bstr::BStr::new(dirname),
                 debug_timer
@@ -1361,7 +1361,7 @@ impl<'a> PackageInstall<'a> {
 
                     bun_output::scoped_log!(
                         install,
-                        "createFile {} {}\n",
+                        "create_file {} {}\n",
                         destination_dir_.fd(),
                         bstr::BStr::new(entry.path.as_bytes())
                     );
@@ -1976,7 +1976,7 @@ impl<'a> PackageInstall<'a> {
         let mut to_buf = PathBuffer::uninit();
         // Open the target relative to cache_dir, then resolve its canonical path.
         // Returning a borrow of `to_buf` from an `FnMut` closure is rejected by
-        // borrowck, so inline the open/getFdPath/close.
+        // borrowck, so inline the open/get_fd_path/close.
         // `bun_sys::Error::into()` would yield raw errno tags (`ENOENT`/`EACCES`),
         // so map the openat errno to the named error tag to preserve the
         // user-visible error tag
