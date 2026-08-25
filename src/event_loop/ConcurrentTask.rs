@@ -131,6 +131,56 @@ pub struct Task {
     pub ptr: *mut (),
 }
 
+/// A task whose queued pointer is a [`ThisPtr`](bun_ptr::ThisPtr) to
+/// `Target`, which keeps itself alive for the task; the dispatcher runs it or
+/// releases it through here. A zero-sized hop type per tag, declared with
+/// [`task_hop!`] next to `Target` so the ref protocol lives there.
+///
+/// # Safety
+/// `TAG` is dispatched (in `bun_runtime::dispatch`) to this impl and no other
+/// task type uses it; and `Target`'s protocol keeps the pointee of every
+/// [`task`](Self::task) it queues alive until `run` / `release_unrun` (a
+/// `RefPtr` slot held for the queued task, or an owner that outlives the queue).
+pub unsafe trait TaskHop {
+    type Target;
+    /// The tag constant from [`task_tag`]; the `bun_runtime::dispatch` match
+    /// arms MUST agree.
+    const TAG: TaskTag;
+    fn run(this: bun_ptr::ThisPtr<Self::Target>) -> crate::JsResult<()>;
+    /// As [`Taskable::release_unrun`].
+    fn release_unrun(this: bun_ptr::ThisPtr<Self::Target>);
+
+    #[inline]
+    fn task(this: bun_ptr::ThisPtr<Self::Target>) -> Task {
+        Task::new(Self::TAG, this.as_ptr().cast::<()>())
+    }
+}
+
+/// Declares `$hop`, the [`TaskHop`] that `task_tag::$tag` dispatches to for
+/// `$target`, forwarding to `$run` / `$release`. The doc comment on the
+/// invocation is where `$target`'s liveness protocol for the queued task is
+/// stated.
+#[macro_export]
+macro_rules! task_hop {
+    ($(#[$m:meta])* $v:vis $hop:ident for $target:ty => $tag:ident; run = $run:expr; release_unrun = $release:expr $(;)?) => {
+        $(#[$m])*
+        $v struct $hop;
+        // SAFETY: see macro doc — one hop per tag; the invoker documents the liveness protocol.
+        unsafe impl $crate::TaskHop for $hop {
+            type Target = $target;
+            const TAG: $crate::TaskTag = $crate::task_tag::$tag;
+            #[inline]
+            fn run(this: ::bun_ptr::ThisPtr<$target>) -> $crate::JsResult<()> {
+                ($run)(this)
+            }
+            #[inline]
+            fn release_unrun(this: ::bun_ptr::ThisPtr<$target>) {
+                ($release)(this)
+            }
+        }
+    };
+}
+
 /// What it takes to be queued as a [`Task`]: a tag, and how the task is
 /// freed when it will never run. Implement on every type that can be
 /// enqueued; the impl lives in whatever crate owns the type.
