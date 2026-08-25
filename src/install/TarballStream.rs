@@ -506,8 +506,7 @@ impl TarballStream {
                 incoming.bytes_received,
             )
         };
-        // Matches the `defer buffer.deinit()` in the buffered `.extract` arm
-        // of `Task.callback`.
+        // The body has been consumed; release the buffer.
         network.response_buffer = Default::default();
 
         let mut task = drain.extract_task.take().expect("stream finishes once");

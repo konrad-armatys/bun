@@ -45,9 +45,6 @@ impl FileCopier {
         })
     }
 
-    // `Walker` owns its resources and drops automatically, so no explicit
-    // `Drop` impl is needed.
-
     pub(crate) fn copy(&mut self) -> sys::Result<()> {
         // `make_open_path` is u8-only; on Windows the OS-unit path is u16 so
         // narrow it via the same infallible `from_w_path` transcode that

@@ -104,9 +104,6 @@ impl WorkspaceMap {
     }
 }
 
-// Drop: all fields are owned (Box<[u8]> keys, Entry { Box<[u8]>, Option<Box<[u8]>> })
-// — Rust drops them automatically; no explicit `deinit` body needed.
-
 #[derive(Clone, Copy)]
 pub(crate) enum NamesArray<'a> {
     Mutable(&'a js_ast::E::Array),

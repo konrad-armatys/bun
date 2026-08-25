@@ -1350,7 +1350,6 @@ pub mod package_manifest {
         ) -> Result<Option<PackageManifest>, Error> {
             let _tracer = bun_core::perf::trace("PackageManifest.Serializer.loadByFile");
             let bytes = manifest_file.read_to_end()?;
-            // errdefer allocator.free(bytes) — Vec drops on error path
 
             if bytes.len() < Self::HEADER_BYTES.len() {
                 return Ok(None);

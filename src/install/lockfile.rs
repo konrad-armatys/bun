@@ -299,7 +299,6 @@ impl Scripts {
     }
 }
 
-// `deinit` becomes `Drop` — body only frees owned fields → delete entirely; Vec<Box<[u8]>> drops automatically.
 
 // ────────────────────────────────────────────────────────────────────────────
 // LoadResult
@@ -2786,13 +2785,6 @@ impl FormatVersion {
         FormatVersion::V3
     }
 }
-
-// ────────────────────────────────────────────────────────────────────────────
-// Drop (deinit)
-// ────────────────────────────────────────────────────────────────────────────
-
-// `deinit` only frees owned fields → handled by Drop on each field type.
-// No explicit Drop impl needed.
 
 // ────────────────────────────────────────────────────────────────────────────
 // EqlSorter
