@@ -103,7 +103,6 @@ pub fn update_package_json_and_install_with_manager(
     original_cwd: &[u8],
 ) -> Result<(), Error> {
     let mut update_requests = UpdateRequestArray::with_capacity(64);
-    // `defer update_requests.deinit(manager.allocator)` — handled by Drop.
 
     if manager.options.positionals.len() <= 1 {
         match manager.subcommand {
@@ -857,7 +856,6 @@ pub fn update_package_json_and_install_and_cli(
             }
         }
     };
-    // `defer ctx.allocator.free(original_cwd)` — `original_cwd: Box<[u8]>` drops at scope exit.
     let _original_cwd_owner: Box<[u8]> = original_cwd;
     let original_cwd: &[u8] = &_original_cwd_owner;
 

@@ -481,7 +481,6 @@ impl<'a> PackageInstaller<'a> {
         let string_buf = lockfile.buffers.string_bytes.as_slice();
         let mut node_modules_path: AbsPath =
             AbsPath::from(self.node_modules.path.as_slice()).unwrap_or_oom();
-        // `defer node_modules_path.deinit()` — AbsPath impls Drop.
 
         let pkgs = lockfile.packages.slice();
         let pkg_name_hashes = pkgs.items_name_hash();
@@ -519,7 +518,6 @@ impl<'a> PackageInstaller<'a> {
             let mut can_retry_without_native_binlink_optimization = false;
             let mut target_node_modules_path_opt: Option<AbsPath> = None;
             let mut defer_this_bin = false;
-            // `defer if (target_node_modules_path_opt) |*path| path.deinit()` — Option<AbsPath> drops.
 
             'native_binlink_optimization: {
                 if !postinstall_optimizer.is_native_binlink_enabled() {
@@ -987,7 +985,6 @@ impl<'a> PackageInstaller<'a> {
 
         if let Some(removed) = self.manager.task_queue.fetch_remove(&task_id) {
             let callbacks = removed.value;
-            // `defer callbacks.deinit(this.manager.allocator)` — Vec drops.
 
             // Manual save/restore of self.node_modules / self.current_tree_id
             // (see install_available_packages). Infallible body — both exit
@@ -1071,7 +1068,6 @@ impl<'a> PackageInstaller<'a> {
             let mut temp = PackageScripts::default();
             let mut temp_lockfile = Lockfile::default();
             temp_lockfile.init_empty();
-            // `defer temp_lockfile.deinit()` — Lockfile impls Drop.
             let mut string_builder = temp_lockfile.string_builder();
             if let Err(err) =
                 temp.fill_from_package_json(&mut string_builder, &mut self.manager.log, folder_path)
@@ -1860,7 +1856,6 @@ impl<'a> PackageInstaller<'a> {
                     {
                         let mut folder_path =
                             AutoAbsPath::from(self.node_modules.path.as_slice()).unwrap_or_oom();
-                        // `defer folder_path.deinit()` — AbsPath impls Drop.
                         folder_path
                             .append(alias.slice(string_buf!()))
                             .unwrap_or_oom();

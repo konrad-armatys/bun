@@ -855,7 +855,6 @@ fn attempt_security_scan_with_retry(
         collector: &collector,
     };
     let json_data = json_builder.build_package_json()?;
-    // `defer manager.allocator.free(json_data)` — Box<[u8]> drops at scope exit.
 
     // destructure `collector` here to release its `&PackageManager`
     // borrow before constructing `SecurityScanSubprocess` (which needs `&mut`).
@@ -1059,7 +1058,6 @@ impl SecurityScanSubprocess {
         let mut spawned =
             spawn::spawn_process_cstr(&spawn_options, argv, spawn::SpawnEnv::Inherit)?
                 .map_err(|e| e.to_zig_err())?;
-        // `defer spawned.extra_pipes.deinit()` — drops at scope exit.
 
         ipc_output_fds[1].close();
 
@@ -1167,7 +1165,6 @@ impl SecurityScanSubprocess {
         let mut spawned =
             spawn::spawn_process_cstr(&spawn_options, argv, spawn::SpawnEnv::Inherit)?
                 .map_err(|e| e.to_zig_err())?;
-        // `defer spawned.extra_pipes.deinit()` — drops at scope exit.
 
         ipc_output_fds[1].close();
         fds.0.unwrap().close();

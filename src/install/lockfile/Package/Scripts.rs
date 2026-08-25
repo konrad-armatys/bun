@@ -302,8 +302,6 @@ impl Scripts {
                     && self.install.is_empty()
                     && self.preinstall.is_empty()
                 {
-                    // `defer save.restore()` — `save()` returns an RAII guard that
-                    // restores the path length on Drop and derefs to the path.
                     let mut save = folder_path.save();
                     let _ = save.append(b"binding.gyp");
 
@@ -342,8 +340,6 @@ impl Scripts {
         let json_buf;
         let parsed;
         let json: Expr = {
-            // `defer save.restore()` — `save()` returns an RAII guard that
-            // restores the path length on Drop and derefs to the path.
             let mut save = folder_path.save();
             let _ = save.append(b"package.json");
 
@@ -371,14 +367,10 @@ impl Scripts {
         resolution_tag: ResolutionTag,
     ) -> Result<Option<List>, crate::Error> {
         let mut tmp = RealLockfile::init_empty_value();
-        // `defer tmp.deinit()` — `tmp` stays empty (only `string_builder` borrows it), so field
-        // auto-drop suffices; Lockfile has no `impl Drop`.
         let mut builder = tmp.string_builder();
         self.fill_from_package_json(&mut builder, log, folder_path)?;
 
         let add_node_gyp_rebuild_script = if self.install.is_empty() && self.preinstall.is_empty() {
-            // `defer save.restore()` — `save()` returns an RAII guard that
-            // restores the path length on Drop and derefs to the path.
             let mut save = folder_path.save();
             let _ = save.append(b"binding.gyp");
 

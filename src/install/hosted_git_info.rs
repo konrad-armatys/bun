@@ -279,7 +279,6 @@ impl HostedGitInfo {
 
         // Shortcut path: github:user/repo, gitlab:user/repo, etc. (from-url.js line 68-96)
         let pathname_owned = parsed.url.pathname().to_owned_slice();
-        // Drop handles `defer allocator.free(pathname_owned)`.
 
         // Strip leading / (from-url.js line 69)
         let mut pathname: &[u8] = strings::trim_prefix(&pathname_owned, b"/");
@@ -344,7 +343,6 @@ pub fn parse_url(npa_str: &[u8]) -> Result<ParsedUrl<'_>, ParseUrlError> {
     // Certain users can provide values like user:password@github.com:foo/bar and we want to
     // "correct" the protocol to be git+ssh://user:password@github.com:foo/bar
     let proto_pair = normalize_protocol(npa_str);
-    // Drop handles `defer proto_pair.deinit()`.
 
     // TODO(markovejnovic): We might be able to avoid this allocation if we rework how jsc.URL
     //                      accepts strings.
@@ -674,7 +672,6 @@ impl<'a> UrlProtocolPair<'a> {
         // TODO(markovejnovic): There is a sad unnecessary allocation here that I don't know how to
         // get rid of -- in theory, the URL layer could allocate once.
         let new_str = strings::concat(parts);
-        // Drop handles `defer allocator.free(new_str)`.
         Parsed::from_utf8(&new_str)
     }
 }

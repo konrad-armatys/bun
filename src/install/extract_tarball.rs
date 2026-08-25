@@ -286,7 +286,6 @@ impl ExtractTarball {
             use bun_libarchive::Archiver;
             let mut zlib_pool = Npm::Registry::BodyPool::get();
             zlib_pool.reset();
-            // `defer Npm.Registry.BodyPool.release(zlib_pool)` → PoolGuard's Drop releases.
 
             let time_started_for_verbose_logs: u64 = if PackageManager::verbose_install() {
                 bun_core::Timespec::now_allow_mocked_time().ns()
@@ -786,7 +785,7 @@ impl ExtractTarball {
                     }
                 };
                 json_buf = buf;
-                // `defer json_file.close()` → close after resolving path.
+                // Closed after resolving its path.
                 json_path = match json_file.get_path(&mut bufs.json_path_buf) {
                     Ok(p) => p,
                     Err(err) => {

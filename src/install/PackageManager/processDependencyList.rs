@@ -191,7 +191,6 @@ impl PackageManager {
                         self.lockfile.buffers.string_bytes.as_slice(),
                         &self.lockfile.buffers.dependencies[dep_id as usize],
                     );
-                    // `defer manager.allocator.free(new_name)` — `new_name: Vec<u8>` drops at scope end.
 
                     {
                         let mut builder = self.lockfile.string_builder();

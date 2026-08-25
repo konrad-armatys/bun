@@ -44,7 +44,6 @@ impl SloppyGlobalGitConfig {
         ) else {
             return SloppyGlobalGitConfig::default();
         };
-        // `defer allocator.free(source.contents)` — handled by Drop on `source`.
 
         let mut remaining = strings::split(source.contents(), b"\n");
         let mut found_askpass = false;

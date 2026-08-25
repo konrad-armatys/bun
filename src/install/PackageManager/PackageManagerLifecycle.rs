@@ -291,7 +291,6 @@ impl PackageManager {
 
         // `AutoAbsPath` is the SEP=auto alias.
         let mut top_level_dir = AutoAbsPath::init_top_level_dir();
-        // `defer top_level_dir.deinit()` — handled by Drop
 
         if root_package.scripts.has_any() {
             let add_node_gyp_rebuild_script = root_package.scripts.install.is_empty()
@@ -348,7 +347,6 @@ impl PackageManager {
         let cwd: &[u8] = &cwd_owned;
         let env_loader = self.configure_env_for_scripts()?;
         let mut script_env = env_loader.map.clone_with_allocator()?;
-        // `defer script_env.map.deinit()` — handled by Drop
 
         // `script_env.put` below needs `&mut`; copy PATH out so the
         // shared borrow does not span it.
