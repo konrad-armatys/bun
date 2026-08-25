@@ -894,7 +894,6 @@ pub fn path_for_resolution<'a>(
     resolution: &Resolution,
     buf: &'a mut PathBuffer,
 ) -> Result<&'a mut [u8], Error> {
-    // const folder_name = this.cachedNPMPackageFolderName(name, version);
     match resolution.tag {
         ResolutionTag::Npm => {
             let npm = *resolution.npm();

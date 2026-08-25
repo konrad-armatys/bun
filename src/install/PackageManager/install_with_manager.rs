@@ -938,7 +938,7 @@ pub fn install_with_manager(
     result
 }
 
-// ─── runAndWaitFn closure family ──────────────────────────────────────────
+// ─── run_and_wait closure family ──────────────────────────────────────────
 // A const-generic struct + three thin wrapper fns.
 
 /// `RunTasksCtx` for the hook-less `run_tasks` call inside
