@@ -1330,41 +1330,6 @@ impl PackageManager {
     }
 }
 
-/// The log `init` builds before the manager exists. The command context's
-/// `log` pointer is already aimed at it, so if setup fails it is leaked
-/// rather than freed.
-struct CtxLog(Option<Box<bun_ast::Log>>);
-
-impl CtxLog {
-    fn new(log: bun_ast::Log) -> Self {
-        CtxLog(Some(Box::new(log)))
-    }
-    fn into_box(mut self) -> Box<bun_ast::Log> {
-        self.0.take().expect("taken once")
-    }
-}
-
-impl core::ops::Deref for CtxLog {
-    type Target = Box<bun_ast::Log>;
-    fn deref(&self) -> &Box<bun_ast::Log> {
-        self.0.as_ref().expect("live")
-    }
-}
-
-impl core::ops::DerefMut for CtxLog {
-    fn deref_mut(&mut self) -> &mut Box<bun_ast::Log> {
-        self.0.as_mut().expect("live")
-    }
-}
-
-impl Drop for CtxLog {
-    fn drop(&mut self) {
-        if let Some(log) = self.0.take() {
-            Box::leak(log);
-        }
-    }
-}
-
 /// Leak the manager for the process and record it as a leak-checker root.
 fn publish(manager: Box<PackageManager>) -> &'static mut PackageManager {
     let manager = Box::leak(manager);
@@ -1484,15 +1449,32 @@ pub fn init(
 ) -> Result<(&'static mut PackageManager, Box<[u8]>), Error> {
     // The manager owns the install log from here on; the command context is
     // re-pointed at it so the rest of the CLI reads and prints the same log.
-    let mut log = CtxLog::new(bun_ast::Log::init());
+    // If setup fails, the context gets its previous log back with whatever
+    // was logged meanwhile.
+    let ctx_log = ctx.log;
+    let mut log = Box::new(bun_ast::Log::init());
     {
         let old = ctx.log_ref();
         log.level = old.level;
         log.clone_line_text = old.clone_line_text;
-        log.msgs.extend(old.msgs.iter().map(bun_ast::Msg::clone));
-        log.warnings = old.warnings;
-        log.errors = old.errors;
     }
+    ctx.log_mut_checked().transfer_to(&mut log);
+    let mut log = Some(log);
+    let result = init_with_log(ctx, cli, subcommand, &mut log);
+    if let Some(mut log) = log {
+        ctx.log = ctx_log;
+        log.transfer_to(ctx.log_mut_checked());
+    }
+    result
+}
+
+fn init_with_log(
+    ctx: Command::Context,
+    cli: CommandLineArguments,
+    subcommand: Subcommand,
+    log_slot: &mut Option<Box<bun_ast::Log>>,
+) -> Result<(&'static mut PackageManager, Box<[u8]>), Error> {
+    let log = log_slot.as_mut().expect("set by init");
     ctx.log = &raw mut **log;
 
     if cli.global {
@@ -1682,7 +1664,7 @@ pub fn init(
                         bun_ast::Source::init_path_string(&*json_path, &json_buf[..json_len]);
                     initialize_store();
                     let parsed =
-                        crate::bun_json::ParsedJson::parse_package_json(&json_source, &mut log)?;
+                        crate::bun_json::ParsedJson::parse_package_json(&json_source, log)?;
                     let json = parsed.root;
                     if subcommand == Subcommand::Pm {
                         if let Some(name) = json.get(b"name").and_then(|e| {
@@ -1953,7 +1935,7 @@ pub fn init(
 
     let manager = publish(Box::new(PackageManager::new(NewOptions {
         options,
-        log: log.into_box(),
+        log: log_slot.take().expect("set by init"),
         env: EnvLoader::Owned(env),
         root_dir,
         thread_pool: ThreadPool::init(thread_pool::Config {

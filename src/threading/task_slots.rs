@@ -37,7 +37,7 @@ impl SharedTask {
     }
 
     /// Claim the node for one trip through the pool, to run `callback`;
-    /// `None` if it is already queued or running.
+    /// `None` if it is already claimed (queued and not yet released).
     #[inline]
     pub fn try_queue(&self, callback: unsafe fn(*mut Task)) -> Option<*mut Task> {
         if self.queued.swap(true, Ordering::AcqRel) {
@@ -96,9 +96,9 @@ struct Slot<T> {
 }
 
 /// `len` tasks addressed by index; [`schedule`](Self::schedule) runs slot
-/// `i`'s [`SlotTask::run`] on the pool. A slot that is already queued or
-/// running is not queued again. Dropping waits for every outstanding run,
-/// so a queued slot never outlives its storage.
+/// `i`'s [`SlotTask::run`] on the pool. A slot that is already queued (not
+/// yet running) is not queued again. Dropping waits for every outstanding
+/// run, so a queued slot never outlives its storage.
 pub struct TaskSlots<T: SlotTask> {
     slots: Box<[Slot<T>]>,
     /// Queued-or-running slots; boxed so the slots can point at it.
@@ -157,14 +157,14 @@ impl<T: SlotTask> TaskSlots<T> {
         Some(slot.cast::<Task>().cast_mut())
     }
 
-    /// Add slot `index` to `batch` (no-op if it is already queued or running).
+    /// Add slot `index` to `batch` (no-op if it is already queued).
     pub fn push(&self, index: usize, batch: &mut Batch) {
         if let Some(task) = self.claim(index) {
             batch.push(Batch::from(task));
         }
     }
 
-    /// Run slot `index` on `pool` (no-op if it is already queued or running).
+    /// Run slot `index` on `pool` (no-op if it is already queued).
     pub fn schedule(&self, pool: &ThreadPool, index: usize) {
         if let Some(task) = self.claim(index) {
             pool.schedule(Batch::from(task));
@@ -186,10 +186,77 @@ unsafe fn run_slot<T: SlotTask>(task: *mut Task) {
     // inside a `TaskSlots<T>` that `Drop` keeps alive while `pending` is
     // non-zero; the pool only runs what `claim` queued.
     let slot = unsafe { &*task.cast::<Slot<T>>() };
-    slot.value.run();
     let pending = slot.pending;
+    // The node is off the pool's queue now, so it may be queued again while
+    // `run` is still going (e.g. the scheduler reacting to what `run`
+    // publishes); `pending` keeps the storage alive for this run regardless.
     slot.task.release();
+    slot.value.run();
     // SAFETY: `pending` is the owning `TaskSlots`' boxed counter, alive until
-    // it reads zero (see `Drop`); `slot` is not touched past `release`.
+    // it reads zero (see `Drop`); `slot` is not touched past this point.
     unsafe { &*pending }.fetch_sub(1, Ordering::AcqRel);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicU32};
+
+    struct SendTask(*mut Task);
+    // SAFETY: what the pool does — the claimed node is handed to one worker.
+    unsafe impl Send for SendTask {}
+    impl SendTask {
+        fn run_on_thread(self) -> std::thread::JoinHandle<()> {
+            std::thread::Builder::new()
+                .spawn(move || {
+                    let SendTask(task) = { self };
+                    // SAFETY: `task` came from `claim`, exactly as the pool gets it.
+                    unsafe { ((*task).callback)(task) };
+                })
+                .unwrap()
+        }
+    }
+
+    fn wait_for(cond: impl Fn() -> bool) {
+        while !cond() {
+            std::thread::yield_now();
+        }
+    }
+
+    /// The scheduler learns that a slot finished from something `run`
+    /// publishes, and may queue the slot again before `run` has returned.
+    /// That second claim must succeed.
+    #[test]
+    fn a_slot_claimed_again_while_its_run_is_returning_runs_again() {
+        struct Step {
+            runs: AtomicU32,
+            rescheduled: AtomicBool,
+        }
+        // SAFETY: every field is synchronized.
+        unsafe impl SlotTask for Step {
+            fn run(&self) {
+                let n = self.runs.fetch_add(1, Ordering::AcqRel) + 1;
+                if n == 1 {
+                    // Still inside `run` while the scheduler reacts.
+                    wait_for(|| self.rescheduled.load(Ordering::Acquire));
+                }
+            }
+        }
+
+        let slots = TaskSlots::new([Step {
+            runs: AtomicU32::new(0),
+            rescheduled: AtomicBool::new(false),
+        }]);
+        let step = slots.get(0);
+
+        let first = SendTask(slots.claim(0).expect("idle slot")).run_on_thread();
+        wait_for(|| step.runs.load(Ordering::Acquire) >= 1);
+        let second = slots.claim(0);
+        step.rescheduled.store(true, Ordering::Release);
+        first.join().unwrap();
+        let second = second.expect("claim while the first run is still inside `run`");
+        SendTask(second).run_on_thread().join().unwrap();
+        assert_eq!(step.runs.load(Ordering::Acquire), 2);
+        drop(slots);
+    }
 }

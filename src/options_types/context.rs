@@ -163,6 +163,19 @@ impl ContextData {
     }
 
     /// Shared-ref counterpart of [`log_mut`] for read-only inspection
+    /// Exclusive access to the log through exclusive access to the context.
+    #[track_caller]
+    #[inline]
+    pub fn log_mut_checked(&mut self) -> &mut bun_ast::Log {
+        assert!(
+            !self.log.is_null(),
+            "ContextData::log_mut_checked() before create_context_data()"
+        );
+        // SAFETY: non-null (asserted), points at the process-static log or
+        // the package manager's; `&mut self` is the only path to it here.
+        unsafe { &mut *self.log }
+    }
+
     /// (`has_errors()`, `print()`).
     #[track_caller]
     #[inline]
