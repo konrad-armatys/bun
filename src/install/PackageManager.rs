@@ -2153,8 +2153,6 @@ pub(crate) fn init_with_runtime(
 
     let cpu_count: u32 = u32::from(bun_core::get_thread_count());
 
-    // var progress = Progress{};
-    // var node = progress.start(name: []const u8, estimated_total_items: usize)
     let top_level_dir_no_trailing_slash =
         strings::without_trailing_slash(FileSystem::instance().top_level_dir());
     let mut original_package_json_path =

@@ -192,7 +192,6 @@ pub(crate) fn edit_patched_dependencies(
     patchfile_path: &[u8],
 ) -> Result<(), bun_alloc::AllocError> {
     let arena = &manager.ast_arena;
-    // const pkg_to_patch = manager.
     let mut patched_dependencies = E::Object::default();
     if let Some(query) = package_json.as_property(b"patchedDependencies") {
         if let bun_ast::ExprData::EObject(obj) = &query.expr.data {

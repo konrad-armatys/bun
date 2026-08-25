@@ -1825,8 +1825,6 @@ impl<T> PkgMap<T> {
     }
 }
 
-// const PkgMap = struct {};
-
 fn object_rows(expr: &Expr) -> &[JSON::E::PropertyJSON] {
     match &expr.data {
         ExprData::EObjectJSON(o) => o.get().properties(),

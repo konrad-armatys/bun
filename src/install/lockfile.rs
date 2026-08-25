@@ -1231,7 +1231,6 @@ impl Lockfile {
             trees_count: 1,
         };
 
-        // try clone_queue.ensure_unused_capacity(root.dependencies.len);
         let _ = root.clone(&mut cloner)?;
 
         // Between here and `cloner.flush()`, `old`/`new`/`manager`
