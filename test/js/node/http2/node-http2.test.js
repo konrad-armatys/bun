@@ -2152,7 +2152,9 @@ it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep t
 
     // (4) a displaced owner left idle: B owns the slot, A corks (flushing B), B's transport
     // pings C once so C takes the slot first, and A displaces C. C then has queued bytes but no
-    // cork; its auto-flush must send them and retire instead of re-arming every tick.
+    // cork: its auto-flush is registered for them, sends them, and retires within the tick.
+    const { h2AutoFlushRegistered } = require("bun:internal-for-testing");
+    const nativeOf = s => s[Symbol.for("::bunhttp2native::")];
     for (let i = 0; i < N; i++) {
       let a, b, c;
       let armed = false;
@@ -2176,8 +2178,10 @@ it("http2 sessions over JS Duplexes whose _write re-enters other sessions keep t
       emit(b);
       armed = true;
       emit(a);
-      for (let j = 0; j < 5; j++) await new Promise(r => setTimeout(r, 10));
       if (armed) throw new Error("B's transport never handed the slot to C");
+      if (!h2AutoFlushRegistered(nativeOf(c))) throw new Error("displaced C has no auto-flush for its queued bytes");
+      for (let j = 0; j < 5; j++) await new Promise(r => setTimeout(r, 10));
+      if (h2AutoFlushRegistered(nativeOf(c))) throw new Error("C's auto-flush still registered after its bytes went out");
       assertWellFormed("a", wa, 2);
       assertWellFormed("b", wb, 2);
       assertWellFormed("c", wc, 2);

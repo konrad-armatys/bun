@@ -2896,6 +2896,7 @@ impl H2FrameParser {
         if self.auto_flusher.get().registered.get()
             && !self.is_corked()
             && self.write_buffer.get().len() <= self.write_buffer_offset.get()
+            && !self.pending_header_compression_error.get()
         {
             self.auto_flusher.get().registered.set(false);
             if let Some(r) = self.auto_flush_ref.take() {
@@ -3143,6 +3144,19 @@ impl H2FrameParser {
         });
         ok
     }
+}
+
+/// bun:internal-for-testing `h2AutoFlushRegistered(parser)`: whether the parser still has a
+/// deferred auto-flush task registered.
+#[bun_jsc::host_fn]
+pub(crate) fn js_auto_flush_registered(
+    global: &JSGlobalObject,
+    frame: &CallFrame,
+) -> JsResult<JSValue> {
+    let Some(parser) = frame.argument(0).as_class_ref::<H2FrameParser>() else {
+        return Err(global.throw_invalid_arguments(format_args!("Expected an H2FrameParser")));
+    };
+    Ok(JSValue::from(parser.auto_flusher.get().registered.get()))
 }
 
 /// Trait to abstract over TLSSocket / TCPSocket for `generic_flush`/`generic_write`.
