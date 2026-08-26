@@ -93,9 +93,7 @@ pub trait PosixPipeWriter {
         while offset < buf.len() {
             match write_fn(fd, &buf[offset..]) {
                 sys::Result::Err(err) => {
-                    // A hard error after a short write is reported as a short
-                    // write so the bytes that reached the fd are credited; the
-                    // retry of the remainder reports the error.
+                    // After a short write, credit it; the retry reports the error.
                     if err.is_retry() || offset > 0 {
                         return WriteResult::Pending(offset);
                     }

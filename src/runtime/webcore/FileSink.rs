@@ -98,9 +98,7 @@ pub mod testing_apis {
 // (acronym splitter treats `AP|Is` as two words); alias so both resolve.
 pub use testing_apis as testing_ap_is;
 
-/// `$newRustFunction("runtime/webcore/FileSink.rs", "jsBytesWritten", 1)`:
-/// bytes the sink has pushed to its fd so far. `fs.WriteStream` reads it after
-/// a failed write, where the rejection alone cannot say how much landed.
+/// Bytes the sink has pushed to its fd so far (`fs.WriteStream`, after a failed write).
 pub(crate) fn js_bytes_written(_global: &JSGlobalObject, frame: &CallFrame) -> JsResult<JSValue> {
     let Some(sink) = crate::webcore::sink::JSSink::<FileSink>::from_js(frame.argument(0)) else {
         return Ok(JSValue::js_number(0.0));
