@@ -104,7 +104,9 @@ pub(crate) fn js_bytes_written(_global: &JSGlobalObject, frame: &CallFrame) -> J
         return Ok(JSValue::js_number(0.0));
     };
     // SAFETY: `from_js` returns the live wrapper's `*mut JSSink<FileSink>`.
-    Ok(JSValue::js_number(unsafe { (*sink).sink.written.get() } as f64))
+    Ok(JSValue::js_number(
+        unsafe { (*sink).sink.written.get() } as f64
+    ))
 }
 
 /// `bun_sys` does not yet export
