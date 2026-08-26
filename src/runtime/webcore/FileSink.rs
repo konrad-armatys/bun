@@ -1142,8 +1142,7 @@ impl FileSink {
         self.to_result(rc, accepted)
     }
 
-    /// `flush()` drains without `on_write`, so its result is the only record
-    /// of those bytes reaching the fd.
+    /// `flush()` drains without `on_write`; record what it pushed to the fd.
     fn count_flushed(&self, rc: &WriteResult) {
         if let WriteResult::Done(n) | WriteResult::Wrote(n) | WriteResult::Pending(n) = rc {
             self.written.set(self.written.get() + n);
