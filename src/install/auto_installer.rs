@@ -314,16 +314,12 @@ impl hooks::AutoInstaller for PackageManager {
         resolution: &hooks::Resolution,
         buf: &'b mut [u8],
     ) -> Result<&'b [u8], bun_core::Error> {
-        // The resolver passes a `bun_paths::PathBuffer`-sized slice
-        // (`bufs!(path_in_global_disk_cache)`); reborrow it as the install
-        // signature's `&mut PathBuffer`.
-        debug_assert!(buf.len() >= bun_paths::MAX_PATH_BYTES);
+        // The resolver passes a `PathBuffer`-sized slice (`bufs!(path_in_global_disk_cache)`).
+        let path_buf = bun_paths::PathBuffer::from_slice_mut(buf).expect("resolver passes a PathBuffer");
         let r = resolution_from_hooks(resolution);
-        let mut path_buf = bun_paths::PathBuffer::uninit();
-        let len = directories::path_for_resolution(self, package_id, &r, &mut path_buf)
+        let len = directories::path_for_resolution(self, package_id, &r, path_buf)
             .map_err(bun_core::Error::from)?
             .len();
-        buf[..len].copy_from_slice(&path_buf[..len]);
         Ok(&buf[..len])
     }
 
