@@ -933,7 +933,7 @@ pub mod lib {
 
     /// A read archive whose bytes come from `S`.
     pub struct StreamingArchive<S: StreamSource> {
-        archive: ReadArchive,
+        archive: core::mem::ManuallyDrop<ReadArchive>,
         /// libarchive's `client_data`: a `Box<S>` we own through this
         /// pointer (freed in `Drop`) so libarchive's copy stays valid.
         source: core::ptr::NonNull<S>,
@@ -942,7 +942,8 @@ pub mod lib {
     impl<S: StreamSource> Drop for StreamingArchive<S> {
         fn drop(&mut self) {
             // Close the archive first: it may still read from the source.
-            drop(core::mem::replace(&mut self.archive, ReadArchive::new()));
+            // SAFETY: dropped exactly once, here; not used afterwards.
+            unsafe { core::mem::ManuallyDrop::drop(&mut self.archive) };
             // SAFETY: `source` is the `Box::into_raw` from `open_gzip_tar`,
             // owned by us and no longer referenced by libarchive.
             drop(unsafe { Box::from_raw(self.source.as_ptr()) });
@@ -1000,7 +1001,7 @@ pub mod lib {
                 || rc == Result::Warn as c_int
                 || rc == Result::Retry as c_int
             {
-                Ok(Self { archive, source })
+                Ok(Self { archive: core::mem::ManuallyDrop::new(archive), source })
             } else {
                 let err = archive.error_string().to_vec();
                 drop(archive);
