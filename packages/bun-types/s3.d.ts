@@ -22,7 +22,7 @@ declare module "bun" {
      * @param chunks The data to write
      * @returns Number of bytes written or, if the write is pending, a Promise resolving to the number of bytes
      */
-    writev(chunks: ArrayBufferView[]): number | Promise<number>;
+    writev(chunks: (ArrayBufferView | ArrayBuffer | SharedArrayBuffer)[]): number | Promise<number>;
     /**
      * Flush the internal buffer, committing the data to disk or the pipe.
      *

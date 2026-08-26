@@ -2474,7 +2474,7 @@ declare module "bun" {
      * Write multiple chunks of data in order.
      * @returns Number of bytes written
      */
-    writev(chunks: ArrayBufferView[]): number;
+    writev(chunks: (ArrayBufferView | ArrayBuffer | SharedArrayBuffer)[]): number;
     /**
      * Flush the internal buffer.
      *

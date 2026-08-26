@@ -101,7 +101,7 @@ pub use testing_apis as testing_ap_is;
 /// Bytes the sink has pushed to its fd so far (`fs.WriteStream`, after a failed write).
 pub(crate) fn js_bytes_written(_global: &JSGlobalObject, frame: &CallFrame) -> JsResult<JSValue> {
     let Some(sink) = crate::webcore::sink::JSSink::<FileSink>::from_js(frame.argument(0)) else {
-        return Ok(JSValue::js_number(0.0));
+        return Ok(JSValue::UNDEFINED);
     };
     // SAFETY: `from_js` returns the live wrapper's `*mut JSSink<FileSink>`.
     Ok(JSValue::js_number(

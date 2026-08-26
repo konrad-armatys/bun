@@ -38,7 +38,7 @@ const { validateInteger, validateInt32, validateFunction } = require("internal/v
 const kIsPerformingIO = Symbol("kIsPerformingIO");
 const kIoDone = Symbol("kIoDone");
 const kFileSink = Symbol("kFileSink");
-const fileSinkBytesWritten: (sink: FileSink) => number = $newRustFunction(
+const fileSinkBytesWritten: (sink: FileSink) => number | undefined = $newRustFunction(
   "runtime/webcore/FileSink.rs",
   "jsBytesWritten",
   1,
@@ -595,6 +595,8 @@ function fileSinkWrite(data, encoding, cb) {
   let rc;
   try {
     rc = sink.write(data);
+    // `true` means the sink is already done and dropped the chunk.
+    if (rc === true) throw $ERR_STREAM_DESTROYED("write");
     if (!$isPromise(rc)) rc = sink.flush();
   } catch (e) {
     return afterFileSinkWriteSettled(this, cb, e, 0);
@@ -625,6 +627,7 @@ function fileSinkWritev(data, cb) {
   let rc;
   try {
     rc = sink.writev(chunks);
+    if (rc === true) throw $ERR_STREAM_DESTROYED("write");
     if (!$isPromise(rc)) rc = sink.flush();
   } catch (e) {
     return afterFileSinkWriteSettled(this, cb, e, 0);
@@ -650,7 +653,8 @@ function afterFileSinkWriteSettled(stream, cb, err, bytes) {
   if (err) {
     // The rejection does not say how much of the chunk landed; the sink does.
     const sink = stream[kFileSink];
-    if (sink && sink !== true) stream.bytesWritten = fileSinkBytesWritten(sink);
+    const written = sink && sink !== true ? fileSinkBytesWritten(sink) : undefined;
+    if (written !== undefined) stream.bytesWritten = written;
     return cb(err);
   }
   stream.bytesWritten += bytes;

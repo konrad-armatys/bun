@@ -559,8 +559,9 @@ if (isWindows) {
     server.listen(pipePath);
     await once(server, "listening");
 
-    const fd = fs.openSync(pipePath, "w");
+    let fd = -1;
     try {
+      fd = fs.openSync(pipePath, "w");
       const baseline = fileSinkInternals.liveCount();
       const sink = Bun.file(fd).writer();
       const rc = sink.write(Buffer.from("hello"));
@@ -578,9 +579,7 @@ if (isWindows) {
       }
       expect(fileSinkInternals.liveCount()).toBeLessThanOrEqual(baseline);
     } finally {
-      try {
-        fs.closeSync(fd);
-      } catch {}
+      if (fd !== -1) fs.closeSync(fd);
       await new Promise<void>(r => server.close(() => r()));
     }
   });
