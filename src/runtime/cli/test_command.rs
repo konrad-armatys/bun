@@ -1589,8 +1589,6 @@ impl CommandLineReporter {
         reporters_lcov: bool,
         enable_ansi_colors: bool,
     ) -> crate::Result<()> {
-        // `coverageReporter = []` with a `coverageThreshold` still decides
-        // the exit code, so the per-file fractions have to be computed.
         if !reporters_text && !reporters_lcov && !opts.fail_on_low_coverage {
             return Ok(());
         }
@@ -1912,8 +1910,6 @@ impl CommandLineReporter {
                 continue;
             };
 
-            // The coverage threshold applies to every reporter, not just the
-            // text table (the exit code reads `opts.fractions.failing`).
             let fraction = report.coverage_fraction(base_fraction);
             if fraction.failing {
                 failing = true;
@@ -3022,8 +3018,7 @@ impl TestCommand {
             && coverage_options.fractions.failing
             && coverage_options.fail_on_low_coverage;
         if coverage_below_threshold {
-            // Metrics `test.coverageThreshold` left out are not enforced and
-            // hold 0 here; name the one(s) the run is failing on.
+            // A metric the config left out holds 0 and is not enforced.
             let thresholds = coverage_options.fractions;
             match (thresholds.functions > 0.0, thresholds.lines > 0.0) {
                 (true, true) => pretty_errorln!(

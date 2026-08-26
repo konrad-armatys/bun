@@ -602,9 +602,7 @@ impl ByteRangeMapping {
                 // only mark the lines as executable if the function has not executed
                 // functions that have executed have non-executable lines in them and thats fine.
                 if !did_fn_execute {
-                    // `max_line` is inclusive; without the + 1 the function's
-                    // last line (all of it, for a single-line function) kept
-                    // whatever the enclosing executed block recorded for it.
+                    // `max_line` is inclusive.
                     let end = (max_line + 1).min(line_count);
                     line_hits_slice[min_line as usize..end as usize].fill(0);
                     for line in min_line..end {
@@ -782,7 +780,7 @@ impl ByteRangeMapping {
                 // only mark the lines as executable if the function has not executed
                 // functions that have executed have non-executable lines in them and thats fine.
                 if !did_fn_execute {
-                    // `max_line` is inclusive; see the identical fix-up above.
+                    // `max_line` is inclusive.
                     let end = (max_line + 1).min(line_count);
                     for line in min_line..end {
                         executable_lines.set(line as usize);

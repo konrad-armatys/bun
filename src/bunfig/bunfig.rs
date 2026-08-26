@@ -499,8 +499,7 @@ impl<'a> Parser<'a> {
                         }
 
                         self.expect(&expr, ExprTag::EObject)?;
-                        // Only the metrics listed in the object are enforced;
-                        // a 0 threshold can never fail.
+                        // A metric the object leaves out stays 0 and so never fails.
                         self.ctx.test_options.coverage.fractions.functions = 0.0;
                         self.ctx.test_options.coverage.fractions.lines = 0.0;
                         self.ctx.test_options.coverage.fractions.stmts = 0.0;
@@ -515,8 +514,6 @@ impl<'a> Parser<'a> {
                             self.expect(value, ExprTag::ENumber)?;
                             let v = value.as_number().expect("infallible: type checked");
 
-                            // Both spellings are accepted; the docs use the
-                            // plural form.
                             if key.eql_comptime(b"functions") || key.eql_comptime(b"function") {
                                 self.ctx.test_options.coverage.fractions.functions = v;
                             } else if key.eql_comptime(b"lines") || key.eql_comptime(b"line") {
