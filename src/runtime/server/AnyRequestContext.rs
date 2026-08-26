@@ -37,8 +37,7 @@ pub enum CtxTag {
     DebugHttps,
     HttpsH3,
     DebugHttpsH3,
-    /// The context finished while JS may still hold the `Request`: `ptr` is the
-    /// [`RequestHeadSnapshot`] its lazy `url`/`headers` getters read instead.
+    /// The context finished; `ptr` is the [`RequestHeadSnapshot`] the lazy getters read instead.
     Head,
 }
 
