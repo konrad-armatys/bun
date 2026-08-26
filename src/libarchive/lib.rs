@@ -1001,7 +1001,10 @@ pub mod lib {
                 || rc == Result::Warn as c_int
                 || rc == Result::Retry as c_int
             {
-                Ok(Self { archive: core::mem::ManuallyDrop::new(archive), source })
+                Ok(Self {
+                    archive: core::mem::ManuallyDrop::new(archive),
+                    source,
+                })
             } else {
                 let err = archive.error_string().to_vec();
                 drop(archive);
