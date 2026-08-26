@@ -928,7 +928,9 @@ impl FileSink {
 
             // SAFETY(JsCell): `IOWriter::flush` is pure I/O; the `on_write`
             // callback it may trigger goes via the stored `*mut FileSink` backref.
-            match (*this).writer.with_mut(|w| w.flush()) {
+            let flush_result = (*this).writer.with_mut(|w| w.flush());
+            (*this).count_flushed(&flush_result);
+            match flush_result {
                 WriteResult::Err(err) => {
                     (*this).update_ref(false);
                     // `flush()` returns a write error without routing through the
@@ -1016,13 +1018,11 @@ impl FileSink {
         if had_buffered_data && !self.writer.get().has_pending_data() {
             self.update_ref(false);
         }
+        self.count_flushed(&rc);
         let flushed = match rc {
             WriteResult::Done(written)
             | WriteResult::Pending(written)
-            | WriteResult::Wrote(written) => {
-                self.written.set(self.written.get() + written as usize); // @truncate
-                written as u64 // @truncate
-            }
+            | WriteResult::Wrote(written) => written as u64, // @truncate
             WriteResult::Err(err) => {
                 return sys::Result::Err(err);
             }
@@ -1140,6 +1140,14 @@ impl FileSink {
         }
         let accepted = self.bytes_accepted(buffered_before, &rc);
         self.to_result(rc, accepted)
+    }
+
+    /// `flush()` drains without `on_write`, so its result is the only record
+    /// of those bytes reaching the fd.
+    fn count_flushed(&self, rc: &WriteResult) {
+        if let WriteResult::Done(n) | WriteResult::Wrote(n) | WriteResult::Pending(n) = rc {
+            self.written.set(self.written.get() + n);
+        }
     }
 
     fn count_stream_bytes(&self, rc: &WriteResult, encoded_len: usize) {
@@ -1268,9 +1276,10 @@ impl FileSink {
 
         // SAFETY(JsCell): `IOWriter::flush` is pure I/O; any callback re-entry
         // goes via the stored `*mut FileSink` backref, not this borrow.
-        match self.writer.with_mut(|w| w.flush()) {
-            WriteResult::Done(written) | WriteResult::Wrote(written) => {
-                self.written.set(self.written.get() + written as usize); // @truncate
+        let flush_result = self.writer.with_mut(|w| w.flush());
+        self.count_flushed(&flush_result);
+        match flush_result {
+            WriteResult::Done(_) | WriteResult::Wrote(_) => {
                 if has_pending {
                     // `to_result` already seeded `Owned(consumed)`; just deliver it.
                     self.run_pending_later();
@@ -1291,8 +1300,7 @@ impl FileSink {
                 self.end_writer();
                 sys::Result::Err(e)
             }
-            WriteResult::Pending(written) => {
-                self.written.set(self.written.get() + written as usize); // @truncate
+            WriteResult::Pending(_) => {
                 if !self.must_be_kept_alive_until_eof.get() {
                     self.must_be_kept_alive_until_eof.set(true);
                     self.ref_();
@@ -1354,6 +1362,7 @@ impl FileSink {
 
         // SAFETY(JsCell): `IOWriter::flush` is pure I/O; no JS while held.
         let flush_result = self.writer.with_mut(|w| w.flush());
+        self.count_flushed(&flush_result);
 
         // `writer.end()` only re-enters `on_close`, which never touches
         // `self.pending`; every arm that tears the writer down here with a
@@ -1407,8 +1416,6 @@ impl FileSink {
                 sys::Result::Err(err)
             }
             WriteResult::Pending(pending_written) => {
-                self.written
-                    .set(self.written.get() + pending_written as usize); // @truncate
                 if !self.must_be_kept_alive_until_eof.get() {
                     self.must_be_kept_alive_until_eof.set(true);
                     self.ref_();

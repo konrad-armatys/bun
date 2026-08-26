@@ -834,7 +834,9 @@ impl<Parent: PosixStreamingWriterParent> PosixStreamingWriter<Parent> {
         debug_assert!(!self.is_done);
 
         if self.should_buffer(0) {
-            self.parent_on_write(buf_len, WriteStatus::Drained);
+            // Nothing reached the fd yet; the parent only needs the
+            // callback to schedule its auto-flush.
+            self.parent_on_write(0, WriteStatus::Drained);
             Self::register_poll(self);
 
             return WriteResult::Wrote(buf_len);
@@ -894,9 +896,9 @@ impl<Parent: PosixStreamingWriterParent> PosixStreamingWriter<Parent> {
                 return WriteResult::Err(sys::Error::oom());
             }
 
-            // noop, but need this to have a chance
-            // to register deferred tasks (onAutoFlush)
-            self.parent_on_write(buf.len(), WriteStatus::Drained);
+            // Nothing reached the fd yet; the parent only needs the
+            // callback to schedule its auto-flush.
+            self.parent_on_write(0, WriteStatus::Drained);
             Self::register_poll(self);
 
             // it's buffered, but should be reported as written to

@@ -4510,6 +4510,52 @@ describe("createWriteStream", () => {
     }
   });
 
+  // A chunk under the sink's 4 KB threshold is buffered first and only hits
+  // the fd on flush. When that flush fails, nothing landed.
+  it.skipIf(!isLinux)("bytesWritten stays 0 when a small buffered write fails", async () => {
+    const ws = createWriteStream("/dev/full");
+    await once(ws, "ready");
+    const errorPromise = once(ws, "error");
+    ws.write(Buffer.alloc(100));
+    const [err] = (await errorPromise) as [NodeJS.ErrnoException];
+    expect({ code: err.code, bytesWritten: ws.bytesWritten }).toEqual({ code: "ENOSPC", bytesWritten: 0 });
+  });
+
+  it.skipIf(!isLinux)("bytesWritten matches the file size when a write fails after many small writes", async () => {
+    using dir = tempDir("cws-efbig-small", {});
+    const out = join(String(dir), "out.bin");
+    const script = `
+      const fs = require("node:fs");
+      const { once } = require("node:events");
+      const s = fs.createWriteStream(${JSON.stringify(out)});
+      const ev = [];
+      s.on("error", e => ev.push("error:" + e.code));
+      s.on("close", () => {
+        console.log(JSON.stringify({ ev, bytesWritten: s.bytesWritten, size: fs.statSync(${JSON.stringify(out)}).size }));
+      });
+      const chunk = Buffer.alloc(512, 0x41);
+      for (let i = 0; i < 8192 && !s.destroyed; i++) {
+        if (!s.write(chunk)) await once(s, "drain").catch(() => {});
+      }
+      s.end();
+    `;
+    await using proc = Bun.spawn({
+      cmd: ["sh", "-c", `ulimit -f 2048; exec "${bunExe()}" -e '${script.replace(/'/g, "'\\''")}'`],
+      env: bunEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([proc.stdout.text(), proc.stderr.text(), proc.exited]);
+    expect(stderr).toBe("");
+    const result = JSON.parse(stdout.trim());
+    expect(result.size).toBeWithin(1, 8192 * 512);
+    expect({ ev: result.ev, bytesWritten: result.bytesWritten, exitCode }).toEqual({
+      ev: ["error:EFBIG"],
+      bytesWritten: result.size,
+      exitCode: 0,
+    });
+  });
+
   it("routes writes through fs.write so a monkey-patch is honoured", async () => {
     using dir = tempDir("ws-patch", {});
     const streamPath = join(String(dir), "out.txt");
