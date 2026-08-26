@@ -4,7 +4,7 @@
  * From https://github.com/oven-sh/WebKit releases.
  */
 // Preview of oven-sh/WebKit#268 on top of main; re-pin to its merge commit's autobuild before merging.
-export const WEBKIT_VERSION = "autobuild-preview-pr-268-4c71e983";
+export const WEBKIT_VERSION = "autobuild-preview-pr-268-58a3181d";
 
 /**
  * WebKit (JavaScriptCore) — the JS engine.
