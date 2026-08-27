@@ -597,7 +597,8 @@ function fileSinkWrite(data, encoding, cb) {
     rc = sink.write(data);
     // `true` means the sink is already done and dropped the chunk.
     if (rc === true) throw $ERR_STREAM_DESTROYED("write");
-    if (!$isPromise(rc)) rc = sink.flush();
+    // flush(true) waits for bytes libuv still has in flight (Windows).
+    if (!$isPromise(rc)) rc = sink.flush(true);
   } catch (e) {
     return afterFileSinkWriteSettled(this, cb, e, 0);
   }
@@ -628,7 +629,7 @@ function fileSinkWritev(data, cb) {
   try {
     rc = sink.writev(chunks);
     if (rc === true) throw $ERR_STREAM_DESTROYED("write");
-    if (!$isPromise(rc)) rc = sink.flush();
+    if (!$isPromise(rc)) rc = sink.flush(true);
   } catch (e) {
     return afterFileSinkWriteSettled(this, cb, e, 0);
   }

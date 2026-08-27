@@ -548,6 +548,25 @@ if (isWindows) {
     );
   });
 
+  // A regular-file write on Windows is an async uv_fs_write; write() reports
+  // it accepted, flush(true) hands back the promise for its completion.
+  it("flush(true) waits for the in-flight uv_fs_write", async () => {
+    const path = join(tmpdirSync(), "flush-wait.bin");
+    const fd = fs.openSync(path, "w");
+    try {
+      const sink = Bun.file(fd).writer();
+      const data = Buffer.alloc(64 * 1024, 0x62);
+      sink.write(data);
+      const flushed = sink.flush(true);
+      expect(flushed).toBeInstanceOf(Promise);
+      await flushed;
+      expect(fs.fstatSync(fd).size).toBe(data.length);
+      await sink.end();
+    } finally {
+      fs.closeSync(fd);
+    }
+  });
+
   it("Bun.file(fd).writer() on a named pipe dups so end() releases the sink", async () => {
     const pipePath = `\\\\.\\pipe\\bun-filesink-${process.pid}-${Date.now()}`;
     const { promise: gotData, resolve: onData, reject: onErr } = Promise.withResolvers<string>();

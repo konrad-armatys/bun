@@ -989,13 +989,14 @@ impl FileSink {
         sys::Result::Ok(())
     }
 
+    /// `wait` makes a flush that left bytes in flight (Windows `uv_fs_write`)
+    /// return the pending promise instead of a count, so the caller can wait
+    /// for them to land.
     pub(crate) fn flush_from_js(
         &self,
         global_this: &JSGlobalObject,
         wait: bool,
     ) -> sys::Result<JSValue> {
-        let _ = wait;
-
         if self.pending.get().state == streams::PendingState::Pending {
             if let streams::WritableFuture::Promise { strong, .. } = &self.pending.get().future {
                 return sys::Result::Ok(strong.value());
@@ -1027,6 +1028,25 @@ impl FileSink {
                 return sys::Result::Err(err);
             }
         };
+        if wait
+            && matches!(rc, WriteResult::Pending(_))
+            && !self.writer.get().is_backed_up()
+            && self.writer.get().has_pending_data()
+        {
+            if !self.must_be_kept_alive_until_eof.get() {
+                self.must_be_kept_alive_until_eof.set(true);
+                self.ref_();
+            }
+            self.pending.with_mut(|p| {
+                p.consumed += flushed;
+                p.result = streams::Writable::Owned(p.consumed);
+            });
+            // SAFETY: JsCell — `WritablePending::promise` allocates a JSPromise
+            // (may GC) but invokes no FileSink host-fn.
+            let promise = unsafe { self.pending.get_mut() }.promise(global_this);
+            // SAFETY: `WritablePending::promise()` never returns null.
+            return sys::Result::Ok(unsafe { (*promise).to_js() });
+        }
         // A flush takes no new chunk from the caller; a pending one reports the
         // bytes it pushed out. It only reaches here when no write is pending.
         match self.to_result(rc, flushed) {

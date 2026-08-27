@@ -4510,6 +4510,18 @@ describe("createWriteStream", () => {
     }
   });
 
+  it("write callback fires only after the bytes are on disk", async () => {
+    using dir = tempDir("ws-cb-on-disk", {});
+    const streamPath = join(String(dir), "out.bin");
+    const ws = createWriteStream(streamPath);
+    await once(ws, "ready");
+    const data = Buffer.alloc(256 * 1024, 0x63);
+    const { promise, resolve, reject } = Promise.withResolvers<number>();
+    ws.write(data, err => (err ? reject(err) : resolve(fstatSync(ws.fd as number).size)));
+    expect(await promise).toBe(data.length);
+    await new Promise<void>((res, rej) => ws.end(e => (e ? rej(e) : res())));
+  });
+
   // A chunk under the sink's 4 KB threshold is buffered first and only hits
   // the fd on flush. When that flush fails, nothing landed.
   it.skipIf(!isLinux)("bytesWritten stays 0 when a small buffered write fails", async () => {

@@ -313,6 +313,9 @@ pub trait JsSinkType: Sized + JsSinkAbi {
         use streams::result::Writable;
         let mut total: u64 = 0;
         let mut backpressure = false;
+        // A sink that parks every write (`Pending`) still takes the next chunk,
+        // so keep going and hand back the last slot.
+        let mut pending = None;
         for b in bufs {
             if b.is_empty() {
                 continue;
@@ -326,8 +329,12 @@ pub trait JsSinkType: Sized + JsSinkAbi {
                 }
                 Writable::OwnedAndDone(n) => return Writable::OwnedAndDone(total + n),
                 Writable::Done => return Writable::OwnedAndDone(total),
-                other => return other,
+                slot @ Writable::Pending(_) => pending = Some(slot),
+                err @ Writable::Err(_) => return err,
             }
+        }
+        if let Some(slot) = pending {
+            return slot;
         }
         if backpressure {
             Writable::Backpressure(total)
