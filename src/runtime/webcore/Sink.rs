@@ -309,6 +309,8 @@ pub trait JsSinkType: Sized + JsSinkAbi {
     fn write_bytes(&mut self, data: &streams::Result) -> streams::result::Writable;
     fn write_utf16(&mut self, data: &streams::Result) -> streams::result::Writable;
     fn write_latin1(&mut self, data: &streams::Result) -> streams::result::Writable;
+    /// `bufs` borrow JS buffers. A sink whose `write_bytes` runs JS must
+    /// override this and copy them first.
     fn writev_bytes(&mut self, bufs: &[&[u8]]) -> streams::result::Writable {
         use streams::result::Writable;
         let mut total: u64 = 0;
@@ -566,9 +568,10 @@ impl<T: JsSinkType> JSSink<T> {
                     )));
                 };
                 let slice = buffer.slice();
-                // SAFETY: `roots` keeps every cell GC-live and no further user
-                // JS runs between here and `writev_bytes`, so the backing
-                // store cannot be detached out from under the slice.
+                // SAFETY: `roots` keeps every cell GC-live. No JS runs before
+                // `writev_bytes`, and a sink whose write runs JS (RewriterPipe)
+                // copies every chunk before its first write, so no slice is
+                // read after a detach could happen.
                 slices.push(unsafe { core::slice::from_raw_parts(slice.as_ptr(), slice.len()) });
             }
             // Acquire `&mut sink` only after all accessor JS has run.
