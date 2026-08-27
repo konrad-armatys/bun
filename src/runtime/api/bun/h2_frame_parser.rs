@@ -7702,8 +7702,12 @@ impl H2FrameParser {
             CORK_OFFSET.with(|c| c.set(0));
             drop(self.cork_ref.take());
         }
-        // Removes the deferred task and releases the ref it holds.
-        self.unregister_auto_flush();
+        // Removes the deferred task and releases the ref it holds, even with a session error
+        // latched for it to report: nothing will run it.
+        if self.auto_flusher.get().registered.get() {
+            AutoFlusher::unregister_deferred_microtask_with_type(self, self.global_this.bun_vm());
+            drop(self.auto_flush_ref.take());
+        }
         // Each stranded `Keepalive` guard's ref will never be popped (its frame cannot resume);
         // release them here.
         drop(self.keepalive_refs.replace(Vec::new()));
