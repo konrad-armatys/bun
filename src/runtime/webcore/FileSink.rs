@@ -989,9 +989,7 @@ impl FileSink {
         sys::Result::Ok(())
     }
 
-    /// `wait` makes a flush that left bytes in flight (Windows `uv_fs_write`)
-    /// return the pending promise instead of a count, so the caller can wait
-    /// for them to land.
+    /// `wait`: bytes still in flight (Windows `uv_fs_write`) yield a promise, not a count.
     pub(crate) fn flush_from_js(
         &self,
         global_this: &JSGlobalObject,
