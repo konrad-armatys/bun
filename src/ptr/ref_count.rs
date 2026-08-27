@@ -550,14 +550,30 @@ pub unsafe trait CellRefCounted: Sized {
 /// `Box::into_raw` / `heap::into_raw` and is the sole remaining owner — the
 /// same precondition as [`CellRefCounted::destroy`], which is the only
 /// sanctioned call site.
+///
+/// # Safety
+/// `this` is the sole live owner of a `Box`-allocated `T`.
 #[inline]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn destroy_box_with<T>(this: *mut T, before: impl FnOnce(&T)) {
+pub unsafe fn destroy_box_with<T>(this: *mut T, before: impl FnOnce(&T)) {
     debug_assert!(!this.is_null());
-    // SAFETY: `CellRefCounted::destroy` contract — `this` is the sole live
-    // owner of a `Box`-allocated `T`; `before` only observes it shared.
+    // SAFETY: fn contract; `before` only observes the pointee shared.
     unsafe {
         before(&*this);
+        drop(Box::from_raw(this));
+    }
+}
+
+/// [`destroy_box_with`] for teardown that needs `&mut T` (the refcount hit
+/// zero, so the destroy path is the pointee's sole owner).
+///
+/// # Safety
+/// `this` is the sole live owner of a `Box`-allocated `T`.
+#[inline]
+pub unsafe fn destroy_box_with_mut<T>(this: *mut T, before: impl FnOnce(&mut T)) {
+    debug_assert!(!this.is_null());
+    // SAFETY: fn contract, so the exclusive borrow aliases nothing.
+    unsafe {
+        before(&mut *this);
         drop(Box::from_raw(this));
     }
 }

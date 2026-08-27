@@ -1418,13 +1418,15 @@ pub enum ClearMode {
 impl CronJob {
     /// `CellRefCounted::destroy` target (refcount hit zero).
     ///
-    /// Safe fn: only reachable via the `#[ref_count(destroy = …)]` derive,
-    /// whose generated trait `destroy` upholds the sole-owner contract.
-    fn destroy_impl(this: *mut Self) {
+    /// # Safety
+    /// Only for the `#[ref_count(destroy = …)]` derive: `this` is the sole
+    /// live owner of the `Box`-allocated job.
+    unsafe fn destroy_impl(this: *mut Self) {
         // deinit: this_value.deinit() then destroy.
         // Note: `JsRef::deinit()` was dropped — Strong's Drop on
         // reassignment handles teardown (JSRef.rs trailer).
-        bun_ptr::destroy_box_with(this, |job| job.this_value.set(JsRef::empty()));
+        // SAFETY: fn contract.
+        unsafe { bun_ptr::destroy_box_with(this, |job| job.this_value.set(JsRef::empty())) };
     }
 }
 

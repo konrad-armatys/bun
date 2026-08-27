@@ -2856,10 +2856,12 @@ impl AttributeIterator {
 
     /// `CellRefCounted::destroy` target.
     ///
-    /// Safe fn: only reachable via the `#[ref_count(destroy = …)]` derive,
-    /// whose generated trait `destroy` upholds the sole-owner contract.
-    fn destroy_on_zero(this: *mut Self) {
-        bun_ptr::destroy_box_with(this, |t| t.detach());
+    /// # Safety
+    /// Only for the `#[ref_count(destroy = …)]` derive: `this` is the sole
+    /// live owner of the `Box` allocation.
+    unsafe fn destroy_on_zero(this: *mut Self) {
+        // SAFETY: fn contract.
+        unsafe { bun_ptr::destroy_box_with(this, |t| t.detach()) };
     }
 
     /// Drop the backref. The element owns our `+1` and clears it here, so the
@@ -2954,10 +2956,12 @@ impl Element {
     /// `CellRefCounted::destroy` target — invalidate borrowed sub-objects
     /// before freeing the Box.
     ///
-    /// Safe fn: only reachable via the `#[ref_count(destroy = …)]` derive,
-    /// whose generated trait `destroy` upholds the sole-owner contract.
-    fn destroy_on_zero(this: *mut Self) {
-        bun_ptr::destroy_box_with(this, |t| t.invalidate());
+    /// # Safety
+    /// Only for the `#[ref_count(destroy = …)]` derive: `this` is the sole
+    /// live owner of the `Box` allocation.
+    unsafe fn destroy_on_zero(this: *mut Self) {
+        // SAFETY: fn contract.
+        unsafe { bun_ptr::destroy_box_with(this, |t| t.invalidate()) };
     }
 
     pub(crate) fn init(element: *mut RawElement) -> NonNull<Element> {
