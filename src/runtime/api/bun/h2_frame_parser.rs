@@ -2374,9 +2374,7 @@ impl H2FrameParser {
         }
         CORKED_H2.set(None);
         CORK_OFFSET.with(|c| c.set(0));
-        if let Some(r) = self.cork_ref.take() {
-            r.deref();
-        }
+        drop(self.cork_ref.take());
     }
 
     pub(crate) fn generic_flush<S: NativeSocketWrite>(&self, mut socket: S) -> usize {
@@ -2900,9 +2898,7 @@ impl H2FrameParser {
             && !self.transport_write_fatal.get()
         {
             self.auto_flusher.get().registered.set(false);
-            if let Some(r) = self.auto_flush_ref.take() {
-                r.deref();
-            }
+            drop(self.auto_flush_ref.take());
             return false;
         }
         true
