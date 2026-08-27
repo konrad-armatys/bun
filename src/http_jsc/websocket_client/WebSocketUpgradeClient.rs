@@ -423,7 +423,9 @@ where
                 // a specific certificate name.
                 if !host_slice.slice().is_empty() {
                     this.hostname
-                        .set(ZBox::from_bytes(bun_http::strip_ipv6_brackets(host_slice.slice())));
+                        .set(ZBox::from_bytes(bun_http::strip_ipv6_brackets(
+                            host_slice.slice(),
+                        )));
                 }
             }
 
@@ -456,7 +458,9 @@ where
             // not the wss:// target.
             if !display_host_.is_empty() {
                 this.hostname
-                    .set(ZBox::from_bytes(bun_http::strip_ipv6_brackets(display_host_)));
+                    .set(ZBox::from_bytes(bun_http::strip_ipv6_brackets(
+                        display_host_,
+                    )));
             }
         }
 
