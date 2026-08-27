@@ -1869,8 +1869,7 @@ impl crate::webcore::sink::JsSinkType for RewriterPipe {
     fn write_bytes(&mut self, data: &StreamResult) -> Writable {
         RewriterPipe::write(self, data)
     }
-    // `write` runs handler JS, which may detach a later chunk's buffer: copy
-    // every chunk before the first feed.
+    // Handler JS runs inside `write` and may detach a later chunk: copy first.
     fn writev_bytes(&mut self, bufs: &[&[u8]]) -> Writable {
         let total = bufs.iter().map(|b| b.len()).sum();
         let mut buf: Vec<u8> = Vec::new();

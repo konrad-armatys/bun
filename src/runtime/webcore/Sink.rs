@@ -309,8 +309,7 @@ pub trait JsSinkType: Sized + JsSinkAbi {
     fn write_bytes(&mut self, data: &streams::Result) -> streams::result::Writable;
     fn write_utf16(&mut self, data: &streams::Result) -> streams::result::Writable;
     fn write_latin1(&mut self, data: &streams::Result) -> streams::result::Writable;
-    /// `bufs` borrow JS buffers. A sink whose `write_bytes` runs JS must
-    /// override this and copy them first.
+    /// `bufs` borrow JS buffers; a sink whose `write_bytes` runs JS must copy them first.
     fn writev_bytes(&mut self, bufs: &[&[u8]]) -> streams::result::Writable {
         use streams::result::Writable;
         let mut total: u64 = 0;
