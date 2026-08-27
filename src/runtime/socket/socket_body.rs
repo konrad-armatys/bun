@@ -351,9 +351,7 @@ impl<const SSL: bool> Drop for CloseTeardown<SSL> {
             self.entered.mark_inactive();
         }
         // Last: this can be the final ref, freeing the socket read above.
-        if let Some(r) = self.io_ref.take() {
-            r.deref();
-        }
+        drop(self.io_ref.take());
     }
 }
 
@@ -396,12 +394,10 @@ struct ConnectErrorTeardown<const SSL: bool> {
 impl<const SSL: bool> Drop for ConnectErrorTeardown<SSL> {
     fn drop(&mut self) {
         let this = self.socket;
-        // `deref` before `mark_inactive`, as the hand-rolled guard did. It
+        // Release before `mark_inactive`, as the hand-rolled guard did. It
         // cannot free the socket here: `handle_connect_error`'s `_guard`
         // is declared before this guard, so it outlives it.
-        if let Some(r) = self.io_ref.take() {
-            r.deref();
-        }
+        drop(self.io_ref.take());
         if this.handlers_are(&self.entered) {
             this.mark_inactive();
         }
@@ -463,9 +459,7 @@ impl<const SSL: bool> NewSocket<SSL> {
     /// Release the [`io_ref`](Self::io_ref), if held. May free `self`;
     /// nothing may touch it afterwards.
     pub(crate) fn release_io_ref(&self) {
-        if let Some(r) = self.io_ref.take() {
-            r.deref();
-        }
+        drop(self.io_ref.take());
     }
 
     #[cfg(windows)]
@@ -477,9 +471,7 @@ impl<const SSL: bool> NewSocket<SSL> {
     /// See [`release_io_ref`](Self::release_io_ref).
     #[cfg(windows)]
     pub(crate) fn release_named_pipe_ref(&self) {
-        if let Some(r) = self.named_pipe_ref.take() {
-            r.deref();
-        }
+        drop(self.named_pipe_ref.take());
     }
 
     // ── codegen accessors ──
@@ -3515,7 +3507,7 @@ impl<const SSL: bool> NewSocket<SSL> {
                 let _clear_err = ClearErrorQueue(err != 0);
                 // Sole owner of the fresh allocation: this drops the owned_ctx
                 // ref and the handlers `Rc`.
-                tls_owned.deref();
+                drop(tls_owned);
                 if err != 0 {
                     return Err(global.throw_value(boringssl_err_to_js(global, err)));
                 }
@@ -3550,11 +3542,7 @@ impl<const SSL: bool> NewSocket<SSL> {
         // Release the retired TCP wrapper's ext-slot ref on EVERY exit past this
         // point, including the `?` early-returns below; the JS wrapper's own +1
         // keeps the allocation alive across the whole call.
-        let _this_deref = scopeguard::guard(this.io_ref.take(), |r| {
-            if let Some(r) = r {
-                r.deref();
-            }
-        });
+        let _io_ref = this.io_ref.take();
         this.detach_native_callback();
         this.socket.set(SocketHandler::<SSL>::DETACHED);
 
@@ -4464,12 +4452,9 @@ impl DuplexUpgradeContext {
 impl Drop for DuplexUpgradeContext {
     fn drop(&mut self) {
         crate::jsc_hooks::ActiveHandle::DuplexUpgrade(NonNull::from(&*self)).unregister();
-        if let Some(tls) = self.tls.replace(None) {
-            // Release the owner's +1.
-            tls.deref();
-        }
-        // Close raced ahead of StartTLS — drop the unconsumed config and ctx
-        // before `upgrade` tears down.
+        // Release the owner's +1 on the TLSSocket, then — close raced ahead of
+        // StartTLS — drop the unconsumed config and ctx before `upgrade` tears down.
+        self.tls.set(None);
         self.ssl_config.set(None);
         self.owned_ctx.set(None);
     }

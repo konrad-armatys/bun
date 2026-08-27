@@ -108,10 +108,11 @@ enum BunSocket {
     TcpWriteonly(bun_ptr::BackRef<TCPSocket, bun_ptr::Root>),
 }
 
-/// The ref a `BunSocket::*Writeonly` attachment holds on its socket.
+/// The ref a `BunSocket::*Writeonly` attachment holds on its socket; held
+/// only to be dropped on detach.
 enum WriteonlySocketRef {
-    Tls(bun_ptr::RefPtr<TLSSocket>),
-    Tcp(bun_ptr::RefPtr<TCPSocket>),
+    Tls(#[allow(dead_code)] bun_ptr::RefPtr<TLSSocket>),
+    Tcp(#[allow(dead_code)] bun_ptr::RefPtr<TCPSocket>),
 }
 
 unsafe extern "C" {
@@ -7484,11 +7485,7 @@ impl H2FrameParser {
             BunSocket::Tls(socket) => socket.detach_native_callback(),
             // Writeonly socket was ref'd on attach; this is the matching release.
             BunSocket::TcpWriteonly(_) | BunSocket::TlsWriteonly(_) => {
-                match self.writeonly_socket_ref.take() {
-                    Some(WriteonlySocketRef::Tcp(r)) => r.deref(),
-                    Some(WriteonlySocketRef::Tls(r)) => r.deref(),
-                    None => {}
-                }
+                drop(self.writeonly_socket_ref.take());
             }
             BunSocket::None => {}
         }

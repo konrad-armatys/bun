@@ -896,7 +896,7 @@ impl ContextFunction {
     #[track_caller]
     pub fn new<H: ContextHostFn>(
         global_object: &JSGlobalObject,
-        symbol_name: Option<&ZigString>,
+        symbol_name: Option<&EncodedSlice>,
         arg_count: u32,
         ctx: bun_ptr::BackRef<H::Context>,
     ) -> Self {

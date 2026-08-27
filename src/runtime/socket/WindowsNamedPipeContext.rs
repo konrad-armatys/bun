@@ -286,9 +286,7 @@ impl WindowsNamedPipeContext {
             // handler can install its own; released once the handler is done.
             let ours = s.named_pipe_ref.take();
             let failed = NewSocket::handle_connect_error(s, errno, 0);
-            if let Some(r) = ours {
-                r.deref();
-            }
+            drop(ours);
             failed
         });
     }
@@ -314,9 +312,7 @@ impl WindowsNamedPipeContext {
             // See `fail_connect`.
             let ours = s.named_pipe_ref.take();
             let closed = NewSocket::on_close(s, socket_from_named_pipe::<SSL>(pipe), 0, None);
-            if let Some(r) = ours {
-                r.deref();
-            }
+            drop(ours);
             closed
         });
         // SAFETY: `this` is the live ctx pointer registered in create();
