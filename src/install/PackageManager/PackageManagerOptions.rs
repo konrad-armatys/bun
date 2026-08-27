@@ -325,6 +325,21 @@ impl Options {
         own.map(|entry| entry.credentials())
     }
 
+    /// A `--registry` or env registry at or under the current default registry keeps
+    /// the default's credentials, unless `.npmrc` has a line specific to the new
+    /// path: then the key walk supplies that line instead, as npm would resolve it.
+    fn inherits_default_credentials(&self, new_url: &bun_url::URL) -> bool {
+        let old_url = self.scope.url.url();
+        if !registry_under(new_url, &old_url) {
+            return false;
+        }
+        match Npm::registry::UrlAuth::find_entry(&self.url_auth, new_url) {
+            Some(own) => Npm::registry::UrlAuth::find_entry(&self.url_auth, &old_url)
+                .is_some_and(|old| old.same_key(own)),
+            None => true,
+        }
+    }
+
     /// Give every scope that ended up without credentials the ones `.npmrc`
     /// configures for its registry URL. `--registry` and `$NPM_CONFIG_REGISTRY` are
     /// applied after the `.npmrc` files were read, so only this pass can serve them.
@@ -732,7 +747,7 @@ impl Options {
                         // Credentials in the URL win, as they do for `registry=` in .npmrc.
                         if !api_registry.has_credentials() {
                             let new_url = bun_url::URL::parse(&api_registry.url);
-                            if registry_under(&new_url, &self.scope.url.url()) {
+                            if self.inherits_default_credentials(&new_url) {
                                 api_registry.token = core::mem::take(&mut self.scope.token);
                                 api_registry.auth = core::mem::take(&mut self.scope.auth);
                             }
@@ -751,7 +766,7 @@ impl Options {
                     self.scope = Npm::registry::Scope::from_api(b"", api_registry, env)?;
                 } else {
                     let new_url = bun_url::URL::parse(&api_registry.url);
-                    if !registry_under(&new_url, &self.scope.url.url()) {
+                    if !self.inherits_default_credentials(&new_url) {
                         self.scope.token = Box::default();
                         self.scope.auth = Box::default();
                         self.scope.user = Box::default();
