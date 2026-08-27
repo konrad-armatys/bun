@@ -300,10 +300,7 @@ impl Options {
     }
 }
 
-/// Result from creating a Terminal
-/// Result from creating a Terminal for `Bun.spawn`. The JS wrapper
-/// (`js_value`) holds the initial ref; `terminal` is a back-reference the
-/// caller keeps alive by keeping `js_value` reachable.
+/// Result from creating a Terminal for `Bun.spawn`.
 pub(crate) struct CreateResult {
     /// The new terminal; its initial ref belongs to the JS wrapper (`js_value`),
     /// which holds itself strong until the terminal closes.
@@ -422,7 +419,7 @@ impl Terminal {
                 // before registerWithFd failed; closeInternal → writer.close()
                 // frees the poll and closes write_fd. Windows: writer.start()
                 // failure leaves source==null so writer.close() is a no-op; close
-                // write_fd directly. Pre-set writer_done so onWriterClose's deref
+                // write_fd directly. Pre-set writer_done so onWriterClose's release
                 // is skipped and the struct isn't freed mid-closeInternal.
                 terminal.update_flags(|f| f.insert(Flags::WRITER_DONE));
                 terminal.read_fd.get().close();
@@ -447,8 +444,9 @@ impl Terminal {
         {
             sys::Result::Err(_) => {
                 // Reader never started: closeInternal skips reader.close() but
-                // runs writer.close() → onWriterClose → deref (2→1). Then drop
-                // the initial ref (1→0).
+                // runs writer.close() → onWriterClose, releasing the writer's
+                // ref (2→1); `terminal` going out of scope drops the initial
+                // ref (1→0).
                 drop(terminal.reader_ref.take());
                 terminal.read_fd.get().close();
                 terminal.read_fd.set(Fd::INVALID);
@@ -1585,7 +1583,6 @@ impl Drop for Terminal {
         // closeInternal() checks flags.closed and returns early on subsequent calls,
         // so this is safe even if finalize() already called it
         self.close_internal();
-        // term_name, reader, writer: field Drop.
     }
 }
 

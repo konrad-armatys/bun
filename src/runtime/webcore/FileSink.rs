@@ -1003,9 +1003,9 @@ impl FileSink {
         // via `self.ref_()`, and `finalize`'s `deref()` below releases it.
         // `JsSinkType::construct` allocates with `ref_count=1` and that +1
         // belongs to the wrapper it's about to be stored in, so no extra
-        // `ref_()` there. Callers that allocate via `init`/`create` and then
-        // `to_js()` must `deref()` once to release init's +1 (see
-        // `Blob::get_writer`). `pending`/`readable_stream` are left for
+        // `ref_()` there. Callers that allocate via `init` and then `to_js()`
+        // must `deref()` once to release init's +1 (see `Blob::get_writer`);
+        // `create*` hand that ref back as a `RefPtr`. `pending`/`readable_stream` are left for
         // `deinit` (Box drop) since in-flight IO may still need them.
         // SAFETY: as above; the `deref` is the last use of `this`.
         unsafe {
