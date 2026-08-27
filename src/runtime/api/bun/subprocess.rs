@@ -959,7 +959,7 @@ impl Subprocess<'_> {
             // cached JS sink kept live by GC).
             //
             // Detach the source first so onAttachedProcessExit's sync FileSink.onClose cannot
-            // re-enter Writable.onClose → pipe.deref() on the still-running pipe.
+            // re-enter Writable.onClose → release the still-running pipe.
             let self_ptr = this.as_ctx_ptr().cast::<Subprocess<'static>>();
             if matches!(
                 *pipe.source.get(),

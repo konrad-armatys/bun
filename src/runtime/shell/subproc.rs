@@ -1536,7 +1536,7 @@ impl PipeReader {
             return;
         }
         Self::finish_after_state_set(this);
-        // Dropping `_guard` is the matching `deref()`; may free `this`.
+        // Dropping `_guard` releases our ref; may free `this`.
     }
 
     /// Spec `signalDoneToCmd`. The tail call into `Cmd::buffered_output_close`
@@ -1671,7 +1671,7 @@ impl PipeReader {
             return;
         }
         Self::finish_after_state_set(this);
-        // Dropping `_guard` is the matching `deref()`; may free `this`.
+        // Dropping `_guard` releases our ref; may free `this`.
     }
 
     pub(crate) fn r#loop(&self) -> *mut AsyncLoop {

@@ -1464,7 +1464,7 @@ fn spawn_maybe_sync(
         let _ = subprocess.try_kill(subprocess.kill_signal);
         // Handles wired above still point into it and `finalize` never runs on
         // this path: the never-wrapped Subprocess stays alive (pre-existing leak).
-        core::mem::forget(subprocess_js_ref.take());
+        let _ = subprocess_js_ref.take().map(bun_ptr::RefPtr::into_raw);
 
         if global_this.has_exception() {
             return Err(JsError::Thrown);
@@ -1696,7 +1696,7 @@ fn spawn_maybe_sync(
         if let Err(err) = Subprocess::StaticPipeWriter::start(buffer.this_ptr()) {
             let _ = subprocess.try_kill(subprocess.kill_signal);
             // As in the `has_exception` path above: stays alive (pre-existing leak).
-            core::mem::forget(subprocess_js_ref.take());
+            let _ = subprocess_js_ref.take().map(bun_ptr::RefPtr::into_raw);
             return Err(global_this.throw_value(err.to_js(global_this)));
         }
     }

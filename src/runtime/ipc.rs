@@ -1046,7 +1046,7 @@ impl SendQueue {
             close_event_sent: Cell::new(false),
             windows: JsCell::new(WindowsState::default()),
         });
-        this.root.set(Some(this.data));
+        this.root.set(Some(this.as_non_null()));
         this
     }
 
