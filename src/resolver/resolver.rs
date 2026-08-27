@@ -1862,7 +1862,12 @@ impl<'a> Resolver<'a> {
                 let mut found = ResultUnion::NotFound;
                 for custom_path in &*custom_paths {
                     let custom_utf8 = custom_path.to_utf8();
-                    found = self.check_relative_path(custom_utf8.slice(), import_path, kind, global_cache);
+                    found = self.check_relative_path(
+                        custom_utf8.slice(),
+                        import_path,
+                        kind,
+                        global_cache,
+                    );
                     if !matches!(found, ResultUnion::NotFound) {
                         break;
                     }
@@ -2000,7 +2005,12 @@ impl<'a> Resolver<'a> {
                 let mut found = ResultUnion::NotFound;
                 for custom_path in &*custom_paths {
                     let custom_utf8 = custom_path.to_utf8();
-                    found = self.check_package_path(custom_utf8.slice(), import_path, kind, global_cache);
+                    found = self.check_package_path(
+                        custom_utf8.slice(),
+                        import_path,
+                        kind,
+                        global_cache,
+                    );
                     if !matches!(found, ResultUnion::NotFound) {
                         break;
                     }
