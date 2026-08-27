@@ -609,10 +609,6 @@ impl<T: AnyRefCounted> RefPtr<T> {
         Self(ptr)
     }
 
-    /// Take a new ref on `*raw_ptr`.
-    ///
-    /// # Safety
-    /// `raw_ptr` must point to a live `T`.
     /// [`new`](Self::new) for a `T` that stores its own root pointer (to hand
     /// out [`ThisPtr`](crate::ThisPtr)s from `&self` entry points). `init`
     /// receives a [`SelfRoot`](crate::SelfRoot) to store in the value; the
@@ -628,6 +624,10 @@ impl<T: AnyRefCounted> RefPtr<T> {
         Self(raw)
     }
 
+    /// Take a new ref on `*raw_ptr`.
+    ///
+    /// # Safety
+    /// `raw_ptr` must point to a live `T`.
     #[inline]
     pub unsafe fn init_ref(raw_ptr: *mut T) -> Self {
         // SAFETY: caller contract
